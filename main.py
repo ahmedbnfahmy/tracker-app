@@ -10,6 +10,8 @@ from typing import Optional
 from PIL import Image, ImageTk
 
 from config import ASSETS_DIR, CAPTURES_DIR, DATA_DIR, ICON_PATH, SCREENSHOT_INTERVAL_SECONDS
+from lap_dialog import LapNameDialog
+from laps import LapStore
 from screenshot import cleanup_old_day_folders, list_captures, take_screenshot
 from share_dialog import ShareLinkDialog
 from time_tracker import TimeTracker, format_duration
@@ -39,6 +41,10 @@ FONTS = {
     "session": ("DejaVu Sans Mono", 13),
     "status": ("Lato", 9),
     "button": ("Lato", 10, "bold"),
+    "lap_name": ("Lato", 10),
+    "lap_meta": ("DejaVu Sans Mono", 9),
+    "lap_index": ("DejaVu Sans Mono", 9, "bold"),
+    "empty": ("Lato", 9),
 }
 
 
@@ -46,8 +52,8 @@ class TrackerApp:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
         self.root.title("Tracker")
-        self.root.geometry("360x680")
-        self.root.minsize(340, 640)
+        self.root.geometry("360x760")
+        self.root.minsize(340, 720)
         self.root.resizable(False, False)
         self.root.configure(bg=COLORS["bg"])
         self._icon_images: list[ImageTk.PhotoImage] = []
@@ -56,6 +62,7 @@ class TrackerApp:
 
         self.tracker = TimeTracker()
         self.uploader = DriveUploader()
+        self.laps = LapStore()
 
         self._running = False
         self._capture_job: Optional[str] = None
@@ -68,6 +75,7 @@ class TrackerApp:
         self._build_ui()
         self._refresh_labels()
         self._refresh_share_status()
+        self._refresh_laps_list()
         removed = cleanup_old_day_folders()
         self._load_latest_preview()
         self._schedule_tick()
@@ -129,7 +137,8 @@ class TrackerApp:
         body.pack(fill=tk.BOTH, expand=True)
 
         indicator_row = tk.Frame(body, bg=COLORS["bg"])
-        indicator_row.pack(fill=tk.X, pady=(0, 8))
+        # Hidden for now — Idle / Tracking indicator
+        # indicator_row.pack(fill=tk.X, pady=(0, 8))
 
         self.pulse_canvas = tk.Canvas(
             indicator_row,
@@ -139,7 +148,7 @@ class TrackerApp:
             highlightthickness=0,
             bd=0,
         )
-        self.pulse_canvas.pack(side=tk.LEFT)
+        # self.pulse_canvas.pack(side=tk.LEFT)
         self._pulse_dot = self.pulse_canvas.create_oval(2, 2, 10, 10, fill=COLORS["idle"], outline="")
 
         self.state_label = tk.Label(
@@ -149,7 +158,7 @@ class TrackerApp:
             fg=COLORS["muted"],
             bg=COLORS["bg"],
         )
-        self.state_label.pack(side=tk.LEFT, padx=(6, 0))
+        # self.state_label.pack(side=tk.LEFT, padx=(6, 0))
 
         self.drive_var = tk.StringVar(value="Share: off — local only")
         self.drive_label = tk.Label(
@@ -160,7 +169,8 @@ class TrackerApp:
             bg=COLORS["bg"],
             anchor="w",
         )
-        self.drive_label.pack(fill=tk.X, pady=(0, 4))
+        # Hidden for now with share UI
+        # self.drive_label.pack(fill=tk.X, pady=(0, 4))
 
         self.public_link_var = tk.StringVar(value="Public link: —")
         self.public_link_label = tk.Label(
@@ -173,10 +183,10 @@ class TrackerApp:
             wraplength=310,
             justify=tk.LEFT,
         )
-        self.public_link_label.pack(fill=tk.X, pady=(0, 4))
+        # self.public_link_label.pack(fill=tk.X, pady=(0, 4))
 
         link_actions = tk.Frame(body, bg=COLORS["bg"])
-        link_actions.pack(fill=tk.X, pady=(0, 8))
+        # link_actions.pack(fill=tk.X, pady=(0, 8))
 
         self.copy_link_btn = tk.Button(
             link_actions,
@@ -193,7 +203,7 @@ class TrackerApp:
             cursor="hand2",
             state=tk.DISABLED,
         )
-        self.copy_link_btn.pack(side=tk.LEFT)
+        # self.copy_link_btn.pack(side=tk.LEFT)
 
         self.open_link_btn = tk.Button(
             link_actions,
@@ -210,7 +220,7 @@ class TrackerApp:
             cursor="hand2",
             state=tk.DISABLED,
         )
-        self.open_link_btn.pack(side=tk.LEFT, padx=(6, 0))
+        # self.open_link_btn.pack(side=tk.LEFT, padx=(6, 0))
 
         tk.Label(
             body,
@@ -267,7 +277,7 @@ class TrackerApp:
             disabledforeground="#6b5a3a",
             relief=tk.FLAT,
             bd=0,
-            padx=14,
+            padx=10,
             pady=6,
             cursor="hand2",
             highlightthickness=0,
@@ -286,13 +296,53 @@ class TrackerApp:
             disabledforeground=COLORS["idle"],
             relief=tk.FLAT,
             bd=0,
-            padx=14,
+            padx=10,
             pady=6,
             cursor="hand2",
             highlightthickness=0,
             state=tk.DISABLED,
         )
         self.stop_btn.pack(side=tk.LEFT, padx=(8, 0))
+
+        self.pause_btn = tk.Button(
+            actions,
+            text="Pause",
+            command=self.toggle_pause,
+            font=FONTS["button"],
+            bg=COLORS["bg_soft"],
+            fg=COLORS["ink"],
+            activebackground=COLORS["line"],
+            activeforeground=COLORS["ink"],
+            disabledforeground=COLORS["idle"],
+            relief=tk.FLAT,
+            bd=0,
+            padx=10,
+            pady=6,
+            cursor="hand2",
+            highlightthickness=0,
+            state=tk.DISABLED,
+        )
+        self.pause_btn.pack(side=tk.LEFT, padx=(8, 0))
+
+        self.lap_btn = tk.Button(
+            actions,
+            text="Lap",
+            command=self.save_lap,
+            font=FONTS["button"],
+            bg=COLORS["bg_soft"],
+            fg=COLORS["ink"],
+            activebackground=COLORS["line"],
+            activeforeground=COLORS["ink"],
+            disabledforeground=COLORS["idle"],
+            relief=tk.FLAT,
+            bd=0,
+            padx=10,
+            pady=6,
+            cursor="hand2",
+            highlightthickness=0,
+            state=tk.DISABLED,
+        )
+        self.lap_btn.pack(side=tk.LEFT, padx=(8, 0))
 
         self.share_btn = tk.Button(
             actions,
@@ -315,6 +365,8 @@ class TrackerApp:
 
         self._bind_button_hover(self.start_btn, COLORS["accent"], COLORS["accent_dim"])
         self._bind_button_hover(self.stop_btn, COLORS["bg_soft"], COLORS["line"])
+        self._bind_button_hover(self.pause_btn, COLORS["bg_soft"], COLORS["line"])
+        self._bind_button_hover(self.lap_btn, COLORS["bg_soft"], COLORS["line"])
 
         self.status_var = tk.StringVar(value="Ready to track")
         self.status_label = tk.Label(
@@ -328,6 +380,68 @@ class TrackerApp:
             anchor="w",
         )
         self.status_label.pack(fill=tk.X, pady=(14, 0))
+
+        tk.Frame(body, height=1, bg=COLORS["line"]).pack(fill=tk.X, pady=(12, 8))
+
+        laps_header = tk.Frame(body, bg=COLORS["bg"])
+        laps_header.pack(fill=tk.X)
+
+        tk.Label(
+            laps_header,
+            text="TODAY'S LAPS",
+            font=FONTS["label"],
+            fg=COLORS["muted"],
+            bg=COLORS["bg"],
+            anchor="w",
+        ).pack(side=tk.LEFT)
+
+        self.laps_count_var = tk.StringVar(value="0")
+        tk.Label(
+            laps_header,
+            textvariable=self.laps_count_var,
+            font=FONTS["lap_meta"],
+            fg=COLORS["accent"],
+            bg=COLORS["bg"],
+            anchor="e",
+        ).pack(side=tk.RIGHT)
+
+        laps_shell = tk.Frame(
+            body,
+            bg=COLORS["bg_mid"],
+            highlightthickness=1,
+            highlightbackground=COLORS["line"],
+        )
+        laps_shell.pack(fill=tk.X, pady=(6, 0))
+
+        self.laps_canvas = tk.Canvas(
+            laps_shell,
+            height=132,
+            bg=COLORS["bg_mid"],
+            highlightthickness=0,
+            bd=0,
+        )
+        self.laps_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        laps_scroll = tk.Scrollbar(
+            laps_shell,
+            orient=tk.VERTICAL,
+            command=self.laps_canvas.yview,
+            troughcolor=COLORS["bg"],
+            bg=COLORS["bg_soft"],
+            activebackground=COLORS["line"],
+            highlightthickness=0,
+            bd=0,
+            width=8,
+        )
+        laps_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        self.laps_canvas.configure(yscrollcommand=laps_scroll.set)
+
+        self.laps_inner = tk.Frame(self.laps_canvas, bg=COLORS["bg_mid"])
+        self._laps_window = self.laps_canvas.create_window((0, 0), window=self.laps_inner, anchor="nw")
+
+        self.laps_inner.bind("<Configure>", self._on_laps_inner_configure)
+        self.laps_canvas.bind("<Configure>", self._on_laps_canvas_configure)
+        self._bind_laps_scroll()
 
         tk.Frame(body, height=1, bg=COLORS["line"]).pack(fill=tk.X, pady=(12, 8))
 
@@ -599,7 +713,7 @@ class TrackerApp:
         self.state_label.configure(text="Idle", fg=COLORS["muted"])
 
     def _animate_pulse(self) -> None:
-        if not self._running:
+        if not self._running or self.tracker.is_paused:
             return
         self._pulse_phase += 0.18
         t = (math.sin(self._pulse_phase) + 1) / 2
@@ -610,6 +724,205 @@ class TrackerApp:
         self.pulse_canvas.itemconfigure(self._pulse_dot, fill=color)
         self._pulse_job = self.root.after(40, self._animate_pulse)
 
+    def _set_pause_button(self, paused: bool) -> None:
+        if paused:
+            self.pause_btn.configure(text="Resume", state=tk.NORMAL, bg=COLORS["accent"], fg=COLORS["accent_text"])
+        else:
+            self.pause_btn.configure(text="Pause", state=tk.NORMAL, bg=COLORS["bg_soft"], fg=COLORS["ink"])
+
+    def toggle_pause(self) -> None:
+        if not self._running or not self.tracker.is_running:
+            return
+
+        if self.tracker.is_paused:
+            self.tracker.resume()
+            self._set_pause_button(False)
+            self.lap_btn.configure(state=tk.NORMAL)
+            self._start_pulse()
+            self._set_status("Resumed", "live")
+            self._schedule_next_capture()
+        else:
+            self.tracker.pause()
+            if self._capture_job is not None:
+                self.root.after_cancel(self._capture_job)
+                self._capture_job = None
+            self._set_pause_button(True)
+            self.lap_btn.configure(state=tk.DISABLED)
+            self._stop_pulse()
+            self.state_label.configure(text="Paused", fg=COLORS["accent"])
+            self._set_status("Paused — timer frozen", "muted")
+        self._refresh_labels()
+
+    def _bind_laps_scroll(self) -> None:
+        def _enter(_event=None) -> None:
+            self.laps_canvas.bind_all("<MouseWheel>", self._on_laps_mousewheel)
+            self.laps_canvas.bind_all("<Button-4>", self._on_laps_linux_scroll)
+            self.laps_canvas.bind_all("<Button-5>", self._on_laps_linux_scroll)
+
+        def _leave(_event=None) -> None:
+            self.laps_canvas.unbind_all("<MouseWheel>")
+            self.laps_canvas.unbind_all("<Button-4>")
+            self.laps_canvas.unbind_all("<Button-5>")
+
+        self.laps_canvas.bind("<Enter>", _enter)
+        self.laps_canvas.bind("<Leave>", _leave)
+
+    def _on_laps_inner_configure(self, _event=None) -> None:
+        self.laps_canvas.configure(scrollregion=self.laps_canvas.bbox("all"))
+
+    def _on_laps_canvas_configure(self, event) -> None:
+        self.laps_canvas.itemconfigure(self._laps_window, width=event.width)
+
+    def _on_laps_mousewheel(self, event) -> None:
+        delta = -1 if event.delta > 0 else 1
+        self.laps_canvas.yview_scroll(delta, "units")
+
+    def _on_laps_linux_scroll(self, event) -> None:
+        self.laps_canvas.yview_scroll(-1 if event.num == 4 else 1, "units")
+
+    @staticmethod
+    def _format_lap_duration(seconds: int) -> str:
+        seconds = max(0, int(seconds))
+        hours, rem = divmod(seconds, 3600)
+        minutes, secs = divmod(rem, 60)
+        if hours:
+            return f"{hours}h {minutes:02d}m"
+        return f"{minutes}m {secs:02d}s"
+
+    def _refresh_laps_list(self) -> None:
+        for child in self.laps_inner.winfo_children():
+            child.destroy()
+
+        laps = self.laps.laps_for()
+        self.laps_count_var.set(str(len(laps)))
+
+        if not laps:
+            empty = tk.Frame(self.laps_inner, bg=COLORS["bg_mid"])
+            empty.pack(fill=tk.BOTH, expand=True, padx=14, pady=28)
+            tk.Label(
+                empty,
+                text="No laps yet",
+                font=FONTS["lap_name"],
+                fg=COLORS["ink"],
+                bg=COLORS["bg_mid"],
+            ).pack(anchor="w")
+            tk.Label(
+                empty,
+                text="Start tracking, then hit Lap to name a task.",
+                font=FONTS["empty"],
+                fg=COLORS["muted"],
+                bg=COLORS["bg_mid"],
+            ).pack(anchor="w", pady=(4, 0))
+            self.laps_canvas.yview_moveto(0)
+            return
+
+        for i, lap in enumerate(laps, start=1):
+            name = str(lap.get("name") or "Untitled")
+            seconds = int(lap.get("seconds") or 0)
+            row_bg = COLORS["bg_soft"] if i % 2 else COLORS["bg_mid"]
+
+            row = tk.Frame(self.laps_inner, bg=row_bg)
+            row.pack(fill=tk.X)
+
+            accent = tk.Frame(row, width=3, bg=COLORS["accent"] if i == len(laps) else COLORS["line"])
+            accent.pack(side=tk.LEFT, fill=tk.Y)
+            accent.pack_propagate(False)
+
+            content = tk.Frame(row, bg=row_bg)
+            content.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(10, 12), pady=8)
+
+            top = tk.Frame(content, bg=row_bg)
+            top.pack(fill=tk.X)
+
+            tk.Label(
+                top,
+                text=f"{i:02d}",
+                font=FONTS["lap_index"],
+                fg=COLORS["accent"],
+                bg=row_bg,
+                width=3,
+                anchor="w",
+            ).pack(side=tk.LEFT)
+
+            tk.Label(
+                top,
+                text=name,
+                font=FONTS["lap_name"],
+                fg=COLORS["ink"],
+                bg=row_bg,
+                anchor="w",
+            ).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(4, 6))
+
+            delete_btn = tk.Button(
+                top,
+                text="✕",
+                command=lambda idx=i - 1, n=name: self._delete_lap(idx, n),
+                font=("Lato", 10, "bold"),
+                bg=row_bg,
+                fg=COLORS["muted"],
+                activebackground=COLORS["line"],
+                activeforeground=COLORS["error"],
+                disabledforeground=COLORS["idle"],
+                relief=tk.FLAT,
+                bd=0,
+                padx=6,
+                pady=0,
+                cursor="hand2",
+                highlightthickness=0,
+            )
+            delete_btn.pack(side=tk.RIGHT)
+            delete_btn.bind(
+                "<Enter>",
+                lambda _e, b=delete_btn: b.configure(fg=COLORS["error"]),
+            )
+            delete_btn.bind(
+                "<Leave>",
+                lambda _e, b=delete_btn: b.configure(fg=COLORS["muted"]),
+            )
+
+            tk.Label(
+                top,
+                text=self._format_lap_duration(seconds),
+                font=FONTS["lap_meta"],
+                fg=COLORS["muted"],
+                bg=row_bg,
+                anchor="e",
+            ).pack(side=tk.RIGHT, padx=(0, 4))
+
+        self.laps_canvas.update_idletasks()
+        self.laps_canvas.configure(scrollregion=self.laps_canvas.bbox("all"))
+
+    def _delete_lap(self, index: int, name: str) -> None:
+        removed = self.laps.delete_lap(index)
+        if removed is None:
+            self._set_status("Could not delete lap", "error")
+            return
+        self._refresh_laps_list()
+        self._set_status(f"Deleted lap: {name}", "muted")
+
+    def save_lap(self) -> None:
+        if not self._running or not self.tracker.is_running:
+            self._set_status("Start tracking before saving a lap", "error")
+            return
+        if self.tracker.is_paused:
+            self._set_status("Resume before saving a lap", "error")
+            return
+
+        elapsed = format_duration(self.tracker.session_elapsed_seconds())
+        dialog = LapNameDialog(self.root, elapsed_label=elapsed)
+        self.root.wait_window(dialog)
+        if not dialog.result_name:
+            self._set_status("Lap cancelled", "muted")
+            return
+
+        seconds, name = self.tracker.lap(dialog.result_name)
+        self.laps.add_lap(name, seconds)
+        self._set_pause_button(False)
+        self._refresh_labels()
+        self._refresh_laps_list()
+        self.laps_canvas.yview_moveto(1.0)
+        self._set_status(f"Lap saved: {name} ({format_duration(seconds)}) — next task started", "ok")
+
     def start_tracking(self) -> None:
         if self._running:
             return
@@ -617,6 +930,8 @@ class TrackerApp:
         self.tracker.start()
         self.start_btn.configure(state=tk.DISABLED, bg=COLORS["bg_soft"])
         self.stop_btn.configure(state=tk.NORMAL, bg=COLORS["bg_soft"])
+        self.lap_btn.configure(state=tk.NORMAL, bg=COLORS["bg_soft"])
+        self._set_pause_button(False)
         mode = "and Drive" if self._sharing else "locally"
         self._set_status(f"Capturing first screenshot ({mode})…", "live")
         self._start_pulse()
@@ -634,19 +949,22 @@ class TrackerApp:
         self.tracker.stop()
         self.start_btn.configure(state=tk.NORMAL, bg=COLORS["accent"])
         self.stop_btn.configure(state=tk.DISABLED, bg=COLORS["bg_soft"])
+        self.pause_btn.configure(text="Pause", state=tk.DISABLED, bg=COLORS["bg_soft"], fg=COLORS["ink"])
+        self.lap_btn.configure(state=tk.DISABLED, bg=COLORS["bg_soft"])
         self._stop_pulse()
         self._set_status("Stopped", "muted")
         self._refresh_labels()
+        self._refresh_laps_list()
 
     def _schedule_next_capture(self) -> None:
-        if not self._running:
+        if not self._running or self.tracker.is_paused:
             return
         interval_ms = max(1, SCREENSHOT_INTERVAL_SECONDS) * 1000
         self._capture_job = self.root.after(interval_ms, self._on_capture_due)
 
     def _on_capture_due(self) -> None:
         self._capture_job = None
-        if not self._running:
+        if not self._running or self.tracker.is_paused:
             return
         self._run_capture_async()
         self._schedule_next_capture()
