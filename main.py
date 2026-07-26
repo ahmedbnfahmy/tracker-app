@@ -44,7 +44,7 @@ FONTS = {
 class TrackerApp:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
-        self.root.title("Screen Tracker")
+        self.root.title("Tracker")
         self.root.geometry("360x620")
         self.root.minsize(340, 580)
         self.root.resizable(False, False)
@@ -69,8 +69,9 @@ class TrackerApp:
         self._load_latest_preview()
         self._schedule_tick()
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
-        # Some window managers only pick up the icon after the window is mapped
+        # Re-apply after map — GNOME/X11 often ignore icons set too early
         self.root.after_idle(self._apply_window_icon)
+        self.root.bind("<Map>", lambda _e: self.root.after(10, self._apply_window_icon), add="+")
 
     def _apply_window_icon(self) -> None:
         """Set the OS window / taskbar icon only (not drawn inside the UI)."""
@@ -88,14 +89,25 @@ class TrackerApp:
             except Exception:
                 continue
 
-        if not images:
-            return
+        if images:
+            self._icon_images = images
+            try:
+                self.root.iconphoto(True, *self._icon_images)
+            except tk.TclError:
+                pass
 
-        self._icon_images = images
-        try:
-            self.root.iconphoto(True, *self._icon_images)
-        except tk.TclError:
-            pass
+        ico = ASSETS_DIR / "icon.ico"
+        if ico.exists():
+            try:
+                # Fallback used by some window managers
+                self.root.iconbitmap(default=str(ico))
+            except tk.TclError:
+                try:
+                    self.root.iconbitmap(str(ico))
+                except tk.TclError:
+                    pass
+
+        self.root.iconname("Tracker")
 
     def _build_ui(self) -> None:
         header = tk.Canvas(self.root, height=88, highlightthickness=0, bd=0)
@@ -300,7 +312,7 @@ class TrackerApp:
         canvas.create_text(
             18,
             32,
-            text="Screen Tracker",
+            text="Tracker",
             anchor="w",
             fill=COLORS["ink"],
             font=FONTS["brand"],
@@ -568,7 +580,7 @@ class TrackerApp:
 
 def main() -> None:
     # className must match StartupWMClass in the .desktop file for dock icon
-    root = tk.Tk(className="ScreenTracker")
+    root = tk.Tk(className="Tracker")
     TrackerApp(root)
     root.mainloop()
 

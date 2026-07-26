@@ -1,7 +1,7 @@
-# Screen Tracker
+# Tracker
 
 ## Summary
-Screen Tracker is a simple Ubuntu desktop app that helps you track work time and keep a visual record of your screen. Click Start to begin a session, and the app counts your time and takes a screenshot every 10 minutes. Screenshots are always saved locally. Connecting Google Drive is optional — when connected, local screenshots are uploaded (and any pending local files are synced). Time today is shown on the start page.
+Tracker is a simple Ubuntu desktop app that helps you track work time and keep a visual record of your screen. Click Start to begin a session, and the app counts your time and takes a screenshot every 10 minutes. Screenshots are always saved locally. Connecting Google Drive is optional — when connected, local screenshots are uploaded (and any pending local files are synced). Time today is shown on the start page.
 
 ## Features
 

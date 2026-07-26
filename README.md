@@ -1,4 +1,4 @@
-# Screen Tracker
+# Tracker
 
 Ubuntu desktop app that tracks work sessions and takes screenshots every 10 minutes. Screenshots are saved locally; Google Drive upload is optional.
 
@@ -49,11 +49,18 @@ SCREENSHOT_INTERVAL_SECONDS=600
 ## Run
 
 ```bash
+# Recommended (uses app icon in the dock on Ubuntu)
+./tracker
+```
+
+Or:
+
+```bash
 source .venv/bin/activate
 python main.py
 ```
 
-For the dock/app menu icon, launch **Screen Tracker** from the app menu (desktop entry is installed). Running from the terminal may still show a generic Python icon in some desktop environments.
+Also available from the app menu as **Tracker**. Prefer `./tracker` (or the menu) over plain `python main.py` so Ubuntu can match the icon.
 
 - **Start** works immediately and saves screenshots to `captures/`.
 - Click **Connect** anytime to sign in; pending local screenshots sync to Drive.

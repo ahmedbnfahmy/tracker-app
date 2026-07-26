@@ -1,0 +1,12 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Tracker
+Comment=Track work time and capture screenshots
+Exec=/home/a-fahmy/Documents/Work/Learning/apps/tracker-app/tracker
+Icon=/home/a-fahmy/Documents/Work/Learning/apps/tracker-app/assets/icon-256.png
+Path=/home/a-fahmy/Documents/Work/Learning/apps/tracker-app
+Terminal=false
+Categories=Utility;
+StartupNotify=true
+StartupWMClass=Tracker
