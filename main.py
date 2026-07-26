@@ -2,15 +2,16 @@ from __future__ import annotations
 
 import json
 import math
+import subprocess
 import threading
 import tkinter as tk
 from typing import Optional
 
 from PIL import Image, ImageTk
 
-from auth_dialog import ConnectDriveDialog
 from config import ASSETS_DIR, CAPTURES_DIR, DATA_DIR, ICON_PATH, SCREENSHOT_INTERVAL_SECONDS
-from screenshot import take_screenshot
+from screenshot import cleanup_old_day_folders, list_captures, take_screenshot
+from share_dialog import ShareLinkDialog
 from time_tracker import TimeTracker, format_duration
 from uploader import DriveUploader
 
@@ -45,8 +46,8 @@ class TrackerApp:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
         self.root.title("Tracker")
-        self.root.geometry("360x620")
-        self.root.minsize(340, 580)
+        self.root.geometry("360x680")
+        self.root.minsize(340, 640)
         self.root.resizable(False, False)
         self.root.configure(bg=COLORS["bg"])
         self._icon_images: list[ImageTk.PhotoImage] = []
@@ -62,16 +63,26 @@ class TrackerApp:
         self._pulse_job: Optional[str] = None
         self._pulse_phase = 0.0
         self._upload_lock = threading.Lock()
+        self._sharing = False
 
         self._build_ui()
         self._refresh_labels()
-        self._refresh_drive_status()
+        self._refresh_share_status()
+        removed = cleanup_old_day_folders()
         self._load_latest_preview()
         self._schedule_tick()
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
         # Re-apply after map — GNOME/X11 often ignore icons set too early
         self.root.after_idle(self._apply_window_icon)
         self.root.bind("<Map>", lambda _e: self.root.after(10, self._apply_window_icon), add="+")
+        if removed:
+            self.root.after(
+                0,
+                lambda n=len(removed): self._set_status(
+                    f"Removed {n} screenshot folder(s) older than 15 days",
+                    "muted",
+                ),
+            )
 
     def _apply_window_icon(self) -> None:
         """Set the OS window / taskbar icon only (not drawn inside the UI)."""
@@ -140,16 +151,66 @@ class TrackerApp:
         )
         self.state_label.pack(side=tk.LEFT, padx=(6, 0))
 
-        self.drive_var = tk.StringVar(value="Drive: not connected")
+        self.drive_var = tk.StringVar(value="Share: off — local only")
         self.drive_label = tk.Label(
             body,
             textvariable=self.drive_var,
             font=FONTS["label"],
-            fg=COLORS["error"],
+            fg=COLORS["muted"],
             bg=COLORS["bg"],
             anchor="w",
         )
-        self.drive_label.pack(fill=tk.X, pady=(0, 8))
+        self.drive_label.pack(fill=tk.X, pady=(0, 4))
+
+        self.public_link_var = tk.StringVar(value="Public link: —")
+        self.public_link_label = tk.Label(
+            body,
+            textvariable=self.public_link_var,
+            font=FONTS["label"],
+            fg=COLORS["muted"],
+            bg=COLORS["bg"],
+            anchor="w",
+            wraplength=310,
+            justify=tk.LEFT,
+        )
+        self.public_link_label.pack(fill=tk.X, pady=(0, 4))
+
+        link_actions = tk.Frame(body, bg=COLORS["bg"])
+        link_actions.pack(fill=tk.X, pady=(0, 8))
+
+        self.copy_link_btn = tk.Button(
+            link_actions,
+            text="Copy link",
+            command=self._copy_public_link,
+            font=FONTS["button"],
+            bg=COLORS["bg_soft"],
+            fg=COLORS["ink"],
+            activebackground=COLORS["line"],
+            relief=tk.FLAT,
+            bd=0,
+            padx=8,
+            pady=4,
+            cursor="hand2",
+            state=tk.DISABLED,
+        )
+        self.copy_link_btn.pack(side=tk.LEFT)
+
+        self.open_link_btn = tk.Button(
+            link_actions,
+            text="Open link",
+            command=self._open_public_link,
+            font=FONTS["button"],
+            bg=COLORS["bg_soft"],
+            fg=COLORS["ink"],
+            activebackground=COLORS["line"],
+            relief=tk.FLAT,
+            bd=0,
+            padx=8,
+            pady=4,
+            cursor="hand2",
+            state=tk.DISABLED,
+        )
+        self.open_link_btn.pack(side=tk.LEFT, padx=(6, 0))
 
         tk.Label(
             body,
@@ -233,10 +294,10 @@ class TrackerApp:
         )
         self.stop_btn.pack(side=tk.LEFT, padx=(8, 0))
 
-        self.connect_btn = tk.Button(
+        self.share_btn = tk.Button(
             actions,
-            text="Connect",
-            command=lambda: self._ensure_connected(force=True),
+            text="Share session",
+            command=self._toggle_share_session,
             font=FONTS["button"],
             bg=COLORS["bg_soft"],
             fg=COLORS["ink"],
@@ -249,11 +310,11 @@ class TrackerApp:
             cursor="hand2",
             highlightthickness=0,
         )
-        self.connect_btn.pack(side=tk.RIGHT)
+        # Hidden for now — keep widget for later re-enable
+        # self.share_btn.pack(side=tk.RIGHT)
 
         self._bind_button_hover(self.start_btn, COLORS["accent"], COLORS["accent_dim"])
         self._bind_button_hover(self.stop_btn, COLORS["bg_soft"], COLORS["line"])
-        self._bind_button_hover(self.connect_btn, COLORS["bg_soft"], COLORS["line"])
 
         self.status_var = tk.StringVar(value="Ready to track")
         self.status_label = tk.Label(
@@ -351,42 +412,102 @@ class TrackerApp:
         self.status_var.set(message)
         self.status_label.configure(fg=color)
 
-    def _refresh_drive_status(self) -> None:
-        if self.uploader.is_connected():
-            email = self.uploader.connected_email() or "connected"
-            self.drive_var.set(f"Drive: {email}")
-            self.drive_label.configure(fg=COLORS["ok"])
-            self.connect_btn.configure(text="Reconnect")
+    def _refresh_share_status(self) -> None:
+        public = self.uploader.public_share_link
+        if public:
+            short = public if len(public) < 42 else public[:39] + "…"
+            self.public_link_var.set(f"Public link: {short}")
+            self.public_link_label.configure(fg=COLORS["ok"])
+            self.copy_link_btn.configure(state=tk.NORMAL)
+            self.open_link_btn.configure(state=tk.NORMAL)
         else:
-            self.drive_var.set("Drive: optional — local only")
+            self.public_link_var.set("Public link: —")
+            self.public_link_label.configure(fg=COLORS["muted"])
+            self.copy_link_btn.configure(state=tk.DISABLED)
+            self.open_link_btn.configure(state=tk.DISABLED)
+
+        if self._sharing and self.uploader.has_folder():
+            self.drive_var.set("Share: on — uploading + anyone-with-link")
+            self.drive_label.configure(fg=COLORS["ok"])
+            self.share_btn.configure(text="Stop sharing", bg=COLORS["live"], fg=COLORS["accent_text"])
+        elif self.uploader.has_folder():
+            self.drive_var.set("Share: off — endpoint saved")
             self.drive_label.configure(fg=COLORS["muted"])
-            self.connect_btn.configure(text="Connect")
+            self.share_btn.configure(text="Share session", bg=COLORS["bg_soft"], fg=COLORS["ink"])
+        else:
+            self.drive_var.set("Share: off — paste /exec upload link")
+            self.drive_label.configure(fg=COLORS["muted"])
+            self.share_btn.configure(text="Share session", bg=COLORS["bg_soft"], fg=COLORS["ink"])
 
-    def _ensure_connected(self, force: bool = False) -> bool:
-        if self.uploader.is_connected() and not force:
-            self._refresh_drive_status()
-            return True
+    def _copy_public_link(self) -> None:
+        link = self.uploader.public_share_link
+        if not link:
+            self._set_status("No public link yet", "error")
+            return
+        self.root.clipboard_clear()
+        self.root.clipboard_append(link)
+        self.root.update()
+        self._set_status("Public Drive link copied — share it with anyone", "ok")
 
-        dialog = ConnectDriveDialog(
-            self.root,
-            on_connect=self.uploader.connect,
-            initial_email="",
-        )
+    def _open_public_link(self) -> None:
+        link = self.uploader.public_share_link
+        if not link:
+            self._set_status("No public link yet", "error")
+            return
+        try:
+            subprocess.Popen(
+                ["xdg-open", link],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except Exception as exc:
+            self._set_status(f"Could not open link — {exc}", "error")
+
+    def _toggle_share_session(self) -> None:
+        if self._sharing:
+            self._sharing = False
+            self._refresh_share_status()
+            self._set_status("Sharing stopped — screenshots stay local", "muted")
+            return
+
+        dialog = ShareLinkDialog(self.root, initial_link=self.uploader.folder_link)
         self.root.wait_window(dialog)
-        if dialog.result_email:
-            self._refresh_drive_status()
-            self._set_status(f"Connected as {dialog.result_email}", "ok")
-            self._sync_local_to_drive_async()
-            return True
+        if not dialog.result_link:
+            self._set_status("Share cancelled", "muted")
+            return
 
-        self._refresh_drive_status()
-        if not self.uploader.is_connected():
-            self._set_status("Still local only — Drive not connected", "muted")
-            return False
-        return True
+        try:
+            self.uploader.save_share_link(dialog.result_link)
+        except Exception as exc:
+            self._set_status(f"Invalid link — {exc}", "error")
+            return
+
+        self._sharing = True
+        self._refresh_share_status()
+        self._set_status("Sharing on — fetching public anyone-with-link…", "live")
+        self._prepare_public_link_async()
+
+    def _prepare_public_link_async(self) -> None:
+        def worker() -> None:
+            try:
+                link = self.uploader.fetch_public_share_link()
+                self.root.after(0, lambda: self._on_public_link_ready(link))
+                self._sync_local_to_drive_async()
+            except Exception as exc:
+                message = str(exc)
+                self.root.after(
+                    0,
+                    lambda m=message: self._set_status(f"Share setup error — {m}", "error"),
+                )
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _on_public_link_ready(self, link: str) -> None:
+        self._refresh_share_status()
+        self._set_status("Public link ready — Copy link to share with anyone", "ok")
 
     def _sync_local_to_drive_async(self) -> None:
-        """Upload any local captures not yet synced when Drive becomes available."""
+        """Upload any local captures not yet synced when sharing is enabled."""
 
         def worker() -> None:
             if not self._upload_lock.acquire(blocking=False):
@@ -404,23 +525,29 @@ class TrackerApp:
 
                 CAPTURES_DIR.mkdir(parents=True, exist_ok=True)
                 pending = sorted(
-                    p for p in CAPTURES_DIR.glob("*.png") if p.name not in uploaded
+                    p for p in list_captures() if p.name not in uploaded
                 )
                 if not pending:
-                    self.root.after(0, lambda: self._set_status("Drive connected — nothing new to sync", "ok"))
+                    self.root.after(0, lambda: self._set_status("Sharing on — nothing new to sync", "ok"))
                     return
 
                 self.root.after(
                     0,
                     lambda n=len(pending): self._set_status(f"Syncing {n} local screenshot(s)…", "live"),
                 )
+                last_share = ""
                 for path in pending:
-                    self.uploader.upload_png(path)
+                    result = self.uploader.upload_png(path)
+                    last_share = result.get("share_link") or last_share
                     uploaded.add(path.name)
                     marker.write_text(json.dumps(sorted(uploaded), indent=2), encoding="utf-8")
+                self.root.after(0, self._refresh_share_status)
                 self.root.after(
                     0,
-                    lambda n=len(pending): self._set_status(f"Synced {n} screenshot(s) to Drive", "ok"),
+                    lambda n=len(pending): self._set_status(
+                        f"Synced {n} screenshot(s). Copy link to share.",
+                        "ok",
+                    ),
                 )
             except Exception as exc:
                 message = str(exc)
@@ -432,7 +559,7 @@ class TrackerApp:
 
     def _load_latest_preview(self) -> None:
         CAPTURES_DIR.mkdir(parents=True, exist_ok=True)
-        files = sorted(CAPTURES_DIR.glob("*.png"), key=lambda p: p.stat().st_mtime)
+        files = list_captures()
         if files:
             self._show_last_screenshot(files[-1])
 
@@ -490,7 +617,7 @@ class TrackerApp:
         self.tracker.start()
         self.start_btn.configure(state=tk.DISABLED, bg=COLORS["bg_soft"])
         self.stop_btn.configure(state=tk.NORMAL, bg=COLORS["bg_soft"])
-        mode = "and Drive" if self.uploader.is_connected() else "locally"
+        mode = "and Drive" if self._sharing else "locally"
         self._set_status(f"Capturing first screenshot ({mode})…", "live")
         self._start_pulse()
         self._refresh_labels()
@@ -532,7 +659,7 @@ class TrackerApp:
             try:
                 path = take_screenshot()
                 self.root.after(0, lambda p=path: self._show_last_screenshot(p))
-                if not self.uploader.is_connected():
+                if not self._sharing:
                     self.root.after(
                         0,
                         lambda: self._set_status(f"Saved locally: {path.name}", "ok"),
@@ -543,7 +670,8 @@ class TrackerApp:
                     0,
                     lambda: self._set_status(f"Saved {path.name} — uploading to Drive…", "live"),
                 )
-                file_id = self.uploader.upload_png(path)
+                result = self.uploader.upload_png(path)
+                file_id = result.get("id", "ok")
                 marker = DATA_DIR / "uploaded.json"
                 DATA_DIR.mkdir(parents=True, exist_ok=True)
                 uploaded: set[str] = set()
@@ -554,9 +682,13 @@ class TrackerApp:
                         uploaded = set()
                 uploaded.add(path.name)
                 marker.write_text(json.dumps(sorted(uploaded), indent=2), encoding="utf-8")
+                self.root.after(0, self._refresh_share_status)
                 self.root.after(
                     0,
-                    lambda: self._set_status(f"Uploaded {path.name} ({file_id[:8]}…)", "ok"),
+                    lambda: self._set_status(
+                        f"Uploaded {path.name} — public link ready to copy",
+                        "ok",
+                    ),
                 )
             except Exception as exc:
                 message = str(exc)

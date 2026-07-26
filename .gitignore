@@ -16,5 +16,6 @@ credentials/service-account.json
 captures/
 data/time_log.json
 data/uploaded.json
+data/drive_share.json
 *.png
 .DS_Store

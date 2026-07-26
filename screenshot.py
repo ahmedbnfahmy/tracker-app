@@ -1,13 +1,52 @@
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from PIL import Image
 
-from config import CAPTURES_DIR
+from config import CAPTURES_DIR, SCREENSHOT_RETENTION_DAYS
+
+_DAY_FOLDER_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def day_folder(day: date | None = None, root: Path = CAPTURES_DIR) -> Path:
+    """Return ~/Documents/TrackerApp/YYYY-MM-DD and create it if needed."""
+    day = day or date.today()
+    folder = root / day.isoformat()
+    folder.mkdir(parents=True, exist_ok=True)
+    return folder
+
+
+def list_captures(root: Path = CAPTURES_DIR) -> list[Path]:
+    """All screenshots under daily folders (and any loose root files)."""
+    root.mkdir(parents=True, exist_ok=True)
+    files = list(root.glob("*/*.png")) + list(root.glob("*.png"))
+    return sorted(files, key=lambda p: p.stat().st_mtime)
+
+
+def cleanup_old_day_folders(
+    root: Path = CAPTURES_DIR,
+    keep_days: int = SCREENSHOT_RETENTION_DAYS,
+) -> list[Path]:
+    """Delete day folders older than keep_days. Returns removed folder paths."""
+    root.mkdir(parents=True, exist_ok=True)
+    cutoff = date.today() - timedelta(days=max(0, keep_days))
+    removed: list[Path] = []
+    for path in root.iterdir():
+        if not path.is_dir() or not _DAY_FOLDER_RE.match(path.name):
+            continue
+        try:
+            folder_day = date.fromisoformat(path.name)
+        except ValueError:
+            continue
+        if folder_day < cutoff:
+            shutil.rmtree(path, ignore_errors=True)
+            removed.append(path)
+    return removed
 
 
 def _timestamp_name() -> str:
@@ -42,9 +81,10 @@ def _capture_with_cli(path: Path) -> None:
     )
 
 
-def take_screenshot(output_dir: Path = CAPTURES_DIR) -> Path:
-    output_dir.mkdir(parents=True, exist_ok=True)
-    path = output_dir / _timestamp_name()
+def take_screenshot(output_dir: Path | None = None) -> Path:
+    folder = day_folder() if output_dir is None else Path(output_dir)
+    folder.mkdir(parents=True, exist_ok=True)
+    path = folder / _timestamp_name()
 
     try:
         _capture_with_mss(path)

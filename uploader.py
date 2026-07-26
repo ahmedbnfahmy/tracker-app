@@ -1,128 +1,162 @@
 from __future__ import annotations
 
+import base64
+import json
+import re
+import urllib.error
+import urllib.request
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
-from google.auth.transport.requests import Request
-from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
-from googleapiclient.discovery import build
-from googleapiclient.http import MediaFileUpload
+from config import DRIVE_SHARE_PATH
 
-from config import (
-    GOOGLE_DRIVE_FOLDER_ID,
-    GOOGLE_OAUTH_CLIENT_FILE,
-    GOOGLE_TOKEN_FILE,
-)
+_DRIVE_FOLDER_RE = re.compile(r"drive\.google\.com/(?:drive/)?(?:.+/)?folders/")
 
-SCOPES = [
-    "https://www.googleapis.com/auth/drive.file",
-    "https://www.googleapis.com/auth/userinfo.email",
-    "openid",
-]
+
+def normalize_upload_url(value: str) -> str:
+    """Accept only an Apps Script web-app URL (.../exec)."""
+    text = (value or "").strip()
+    if not text:
+        raise ValueError("Paste your Apps Script web-app link (ends with /exec).")
+
+    if _DRIVE_FOLDER_RE.search(text) or (
+        "drive.google.com" in text and "script.google.com" not in text
+    ):
+        raise ValueError(
+            "Paste the Apps Script /exec URL (not the Drive folder link).\n"
+            "See drive_upload/README.md — then Tracker will show the public Drive link."
+        )
+
+    if "script.google.com/macros/s/" in text and "/exec" in text:
+        match = re.search(
+            r"(https://script\.google\.com/macros/s/[a-zA-Z0-9_-]+/exec)",
+            text,
+        )
+        if match:
+            return match.group(1)
+
+    raise ValueError(
+        "Need an Apps Script link like:\n"
+        "https://script.google.com/macros/s/.../exec"
+    )
 
 
 class DriveUploader:
-    def __init__(
-        self,
-        client_secrets: Path = GOOGLE_OAUTH_CLIENT_FILE,
-        token_file: Path = GOOGLE_TOKEN_FILE,
-        folder_id: str = GOOGLE_DRIVE_FOLDER_ID,
-    ) -> None:
-        self.client_secrets = Path(client_secrets)
-        self.token_file = Path(token_file)
-        self.folder_id = (folder_id or "").strip()
-        self._creds: Optional[Credentials] = None
-        self._service = None
-        self._email: Optional[str] = None
+    """Upload via Apps Script; receive public anyone-with-link Drive URLs back."""
 
-    def is_connected(self) -> bool:
-        return self._load_credentials() is not None
+    def __init__(self, share_path: Path = DRIVE_SHARE_PATH) -> None:
+        self.share_path = Path(share_path)
+        self._upload_url: str = ""
+        self._public_share_link: str = ""
+        self._load_share_config()
 
-    def connected_email(self) -> Optional[str]:
-        if not self.is_connected():
-            return None
-        if self._email:
-            return self._email
+    def _load_share_config(self) -> None:
+        if not self.share_path.exists():
+            return
         try:
-            service = build("oauth2", "v2", credentials=self._creds, cache_discovery=False)
-            info = service.userinfo().get().execute()
-            self._email = info.get("email")
-        except Exception:
-            self._email = None
-        return self._email
+            data = json.loads(self.share_path.read_text(encoding="utf-8"))
+            raw = (data.get("upload_url") or "").strip()
+            self._public_share_link = (data.get("public_share_link") or "").strip()
+            if raw:
+                try:
+                    self._upload_url = normalize_upload_url(raw)
+                except ValueError:
+                    self._upload_url = ""
+        except (json.JSONDecodeError, OSError):
+            self._upload_url = ""
+            self._public_share_link = ""
 
-    def connect(self) -> str:
-        """Run browser OAuth and persist token. Returns connected email."""
-        if not self.client_secrets.exists():
-            raise FileNotFoundError(
-                f"OAuth client file not found: {self.client_secrets}\n"
-                "Create an OAuth Desktop client in Google Cloud and save it there."
-            )
-        flow = InstalledAppFlow.from_client_secrets_file(str(self.client_secrets), SCOPES)
-        creds = flow.run_local_server(port=0)
-        self._save_credentials(creds)
-        self._creds = creds
-        self._service = None
-        self._email = None
-        email = self.connected_email() or "connected"
-        return email
-
-    def disconnect(self) -> None:
-        self._creds = None
-        self._service = None
-        self._email = None
-        if self.token_file.exists():
-            self.token_file.unlink()
-
-    def _load_credentials(self) -> Optional[Credentials]:
-        if self._creds and self._creds.valid:
-            return self._creds
-
-        creds: Optional[Credentials] = None
-        if self.token_file.exists():
-            creds = Credentials.from_authorized_user_file(str(self.token_file), SCOPES)
-
-        if creds and creds.expired and creds.refresh_token:
-            try:
-                creds.refresh(Request())
-                self._save_credentials(creds)
-            except Exception:
-                creds = None
-
-        if creds and creds.valid:
-            self._creds = creds
-            return creds
-
-        self._creds = None
-        return None
-
-    def _save_credentials(self, creds: Credentials) -> None:
-        self.token_file.parent.mkdir(parents=True, exist_ok=True)
-        self.token_file.write_text(creds.to_json(), encoding="utf-8")
-
-    def _get_service(self):
-        if self._service is not None:
-            return self._service
-        creds = self._load_credentials()
-        if creds is None:
-            raise RuntimeError("Google Drive is not connected. Sign in first.")
-        if not self.folder_id or self.folder_id == "your_folder_id_here":
-            raise ValueError("GOOGLE_DRIVE_FOLDER_ID is not configured in .env")
-        self._service = build("drive", "v3", credentials=creds, cache_discovery=False)
-        return self._service
-
-    def upload_png(self, file_path: Path) -> str:
-        file_path = Path(file_path)
-        service = self._get_service()
-        metadata = {
-            "name": file_path.name,
-            "parents": [self.folder_id],
-        }
-        media = MediaFileUpload(str(file_path), mimetype="image/png", resumable=True)
-        created = (
-            service.files()
-            .create(body=metadata, media_body=media, fields="id", supportsAllDrives=True)
-            .execute()
+    def _persist(self) -> None:
+        self.share_path.parent.mkdir(parents=True, exist_ok=True)
+        self.share_path.write_text(
+            json.dumps(
+                {
+                    "upload_url": self._upload_url,
+                    "public_share_link": self._public_share_link,
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
         )
-        return created["id"]
+
+    def save_share_link(self, link: str) -> str:
+        self._upload_url = normalize_upload_url(link)
+        self._persist()
+        return self._upload_url
+
+    def set_public_share_link(self, url: str) -> None:
+        self._public_share_link = (url or "").strip()
+        self._persist()
+
+    @property
+    def folder_link(self) -> str:
+        return self._upload_url
+
+    @property
+    def upload_url(self) -> str:
+        return self._upload_url
+
+    @property
+    def public_share_link(self) -> str:
+        return self._public_share_link
+
+    def has_folder(self) -> bool:
+        return bool(self._upload_url)
+
+    def _request_json(self, method: str, payload: Optional[dict] = None) -> dict[str, Any]:
+        if not self._upload_url:
+            raise ValueError("No upload endpoint saved.")
+
+        data = None if payload is None else json.dumps(payload).encode("utf-8")
+        headers = {"Content-Type": "application/json"} if payload is not None else {}
+        request = urllib.request.Request(
+            self._upload_url,
+            data=data,
+            headers=headers,
+            method=method,
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=120) as response:
+                raw = response.read().decode("utf-8", errors="replace")
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="replace")
+            raise RuntimeError(f"Request failed ({exc.code}): {detail or exc.reason}") from exc
+        except urllib.error.URLError as exc:
+            raise RuntimeError(f"Request failed: {exc.reason}") from exc
+
+        try:
+            result = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError("Endpoint did not return JSON. Check the /exec URL.") from exc
+        if isinstance(result, dict) and result.get("error"):
+            raise RuntimeError(str(result["error"]))
+        if not isinstance(result, dict):
+            raise RuntimeError("Unexpected response from upload endpoint.")
+        return result
+
+    def fetch_public_share_link(self) -> str:
+        """GET the web app — ensures folder is anyone-with-link and returns its URL."""
+        result = self._request_json("GET")
+        link = (result.get("shareLink") or result.get("folderUrl") or "").strip()
+        if not link:
+            raise RuntimeError("No share link returned. Redeploy Apps Script with latest Code.gs.")
+        self.set_public_share_link(link)
+        return link
+
+    def upload_png(self, file_path: Path) -> dict[str, str]:
+        file_path = Path(file_path)
+        payload = {
+            "filename": file_path.name,
+            "mimeType": "image/png",
+            "content": base64.b64encode(file_path.read_bytes()).decode("ascii"),
+        }
+        result = self._request_json("POST", payload)
+        file_id = str(result.get("id") or "ok")
+        share = (result.get("shareLink") or result.get("folderUrl") or "").strip()
+        if share:
+            self.set_public_share_link(share)
+        return {
+            "id": file_id,
+            "share_link": share or self._public_share_link,
+            "file_url": str(result.get("fileUrl") or ""),
+        }
