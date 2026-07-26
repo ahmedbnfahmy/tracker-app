@@ -32,12 +32,12 @@ COLORS = {
 }
 
 FONTS = {
-    "brand": ("Lato", 28, "bold"),
-    "label": ("Lato", 10),
-    "value": ("DejaVu Sans Mono", 22),
-    "session": ("DejaVu Sans Mono", 16),
-    "status": ("Lato", 11),
-    "button": ("Lato", 12, "bold"),
+    "brand": ("Lato", 20, "bold"),
+    "label": ("Lato", 9),
+    "value": ("DejaVu Sans Mono", 18),
+    "session": ("DejaVu Sans Mono", 13),
+    "status": ("Lato", 9),
+    "button": ("Lato", 10, "bold"),
 }
 
 
@@ -45,11 +45,12 @@ class TrackerApp:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
         self.root.title("Screen Tracker")
-        self.root.geometry("420x520")
-        self.root.minsize(400, 500)
+        self.root.geometry("360x620")
+        self.root.minsize(340, 580)
         self.root.resizable(False, False)
         self.root.configure(bg=COLORS["bg"])
         self._icon_images: list[ImageTk.PhotoImage] = []
+        self._preview_image: Optional[ImageTk.PhotoImage] = None
         self._apply_window_icon()
 
         self.tracker = TimeTracker()
@@ -65,6 +66,7 @@ class TrackerApp:
         self._build_ui()
         self._refresh_labels()
         self._refresh_drive_status()
+        self._load_latest_preview()
         self._schedule_tick()
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
         # Some window managers only pick up the icon after the window is mapped
@@ -96,26 +98,26 @@ class TrackerApp:
             pass
 
     def _build_ui(self) -> None:
-        header = tk.Canvas(self.root, height=120, highlightthickness=0, bd=0)
+        header = tk.Canvas(self.root, height=88, highlightthickness=0, bd=0)
         header.pack(fill=tk.X)
         self._draw_header(header)
 
-        body = tk.Frame(self.root, bg=COLORS["bg"], padx=28, pady=20)
+        body = tk.Frame(self.root, bg=COLORS["bg"], padx=18, pady=12)
         body.pack(fill=tk.BOTH, expand=True)
 
         indicator_row = tk.Frame(body, bg=COLORS["bg"])
-        indicator_row.pack(fill=tk.X, pady=(0, 14))
+        indicator_row.pack(fill=tk.X, pady=(0, 8))
 
         self.pulse_canvas = tk.Canvas(
             indicator_row,
-            width=14,
-            height=14,
+            width=12,
+            height=12,
             bg=COLORS["bg"],
             highlightthickness=0,
             bd=0,
         )
         self.pulse_canvas.pack(side=tk.LEFT)
-        self._pulse_dot = self.pulse_canvas.create_oval(2, 2, 12, 12, fill=COLORS["idle"], outline="")
+        self._pulse_dot = self.pulse_canvas.create_oval(2, 2, 10, 10, fill=COLORS["idle"], outline="")
 
         self.state_label = tk.Label(
             indicator_row,
@@ -124,7 +126,7 @@ class TrackerApp:
             fg=COLORS["muted"],
             bg=COLORS["bg"],
         )
-        self.state_label.pack(side=tk.LEFT, padx=(8, 0))
+        self.state_label.pack(side=tk.LEFT, padx=(6, 0))
 
         self.drive_var = tk.StringVar(value="Drive: not connected")
         self.drive_label = tk.Label(
@@ -135,7 +137,7 @@ class TrackerApp:
             bg=COLORS["bg"],
             anchor="w",
         )
-        self.drive_label.pack(fill=tk.X, pady=(0, 14))
+        self.drive_label.pack(fill=tk.X, pady=(0, 8))
 
         tk.Label(
             body,
@@ -154,9 +156,9 @@ class TrackerApp:
             fg=COLORS["ink"],
             bg=COLORS["bg"],
             anchor="w",
-        ).pack(fill=tk.X, pady=(2, 16))
+        ).pack(fill=tk.X, pady=(1, 10))
 
-        tk.Frame(body, height=1, bg=COLORS["line"]).pack(fill=tk.X, pady=(0, 16))
+        tk.Frame(body, height=1, bg=COLORS["line"]).pack(fill=tk.X, pady=(0, 10))
 
         tk.Label(
             body,
@@ -175,7 +177,7 @@ class TrackerApp:
             fg=COLORS["accent"],
             bg=COLORS["bg"],
             anchor="w",
-        ).pack(fill=tk.X, pady=(2, 20))
+        ).pack(fill=tk.X, pady=(1, 12))
 
         actions = tk.Frame(body, bg=COLORS["bg"])
         actions.pack(fill=tk.X)
@@ -192,8 +194,8 @@ class TrackerApp:
             disabledforeground="#6b5a3a",
             relief=tk.FLAT,
             bd=0,
-            padx=22,
-            pady=10,
+            padx=14,
+            pady=6,
             cursor="hand2",
             highlightthickness=0,
         )
@@ -211,13 +213,13 @@ class TrackerApp:
             disabledforeground=COLORS["idle"],
             relief=tk.FLAT,
             bd=0,
-            padx=22,
-            pady=10,
+            padx=14,
+            pady=6,
             cursor="hand2",
             highlightthickness=0,
             state=tk.DISABLED,
         )
-        self.stop_btn.pack(side=tk.LEFT, padx=(10, 0))
+        self.stop_btn.pack(side=tk.LEFT, padx=(8, 0))
 
         self.connect_btn = tk.Button(
             actions,
@@ -230,8 +232,8 @@ class TrackerApp:
             activeforeground=COLORS["ink"],
             relief=tk.FLAT,
             bd=0,
-            padx=14,
-            pady=10,
+            padx=10,
+            pady=6,
             cursor="hand2",
             highlightthickness=0,
         )
@@ -248,36 +250,70 @@ class TrackerApp:
             font=FONTS["status"],
             fg=COLORS["muted"],
             bg=COLORS["bg"],
-            wraplength=350,
+            wraplength=310,
             justify=tk.LEFT,
             anchor="w",
         )
-        self.status_label.pack(fill=tk.X, pady=(24, 0))
+        self.status_label.pack(fill=tk.X, pady=(14, 0))
+
+        tk.Frame(body, height=1, bg=COLORS["line"]).pack(fill=tk.X, pady=(12, 8))
+
+        tk.Label(
+            body,
+            text="LAST SCREENSHOT",
+            font=FONTS["label"],
+            fg=COLORS["muted"],
+            bg=COLORS["bg"],
+            anchor="w",
+        ).pack(fill=tk.X)
+
+        self.preview_name_var = tk.StringVar(value="No screenshots yet")
+        tk.Label(
+            body,
+            textvariable=self.preview_name_var,
+            font=FONTS["label"],
+            fg=COLORS["ink"],
+            bg=COLORS["bg"],
+            anchor="w",
+        ).pack(fill=tk.X, pady=(1, 6))
+
+        self.preview_frame = tk.Frame(body, bg=COLORS["bg_soft"], height=190)
+        self.preview_frame.pack(fill=tk.X)
+        self.preview_frame.pack_propagate(False)
+
+        self.preview_label = tk.Label(
+            self.preview_frame,
+            text="Capture will show here",
+            font=FONTS["status"],
+            fg=COLORS["muted"],
+            bg=COLORS["bg_soft"],
+        )
+        self.preview_label.pack(expand=True, fill=tk.BOTH)
 
     def _draw_header(self, canvas: tk.Canvas) -> None:
-        width = 420
-        height = 120
+        width = 360
+        height = 88
         bands = ("#15202e", "#1a2332", "#1f2a3d", "#243044")
         band_h = height // len(bands)
         for i, color in enumerate(bands):
             canvas.create_rectangle(0, i * band_h, width, (i + 1) * band_h + 2, fill=color, outline="")
         canvas.create_text(
-            28,
-            42,
+            18,
+            32,
             text="Screen Tracker",
             anchor="w",
             fill=COLORS["ink"],
             font=FONTS["brand"],
         )
         canvas.create_text(
-            28,
-            82,
+            18,
+            58,
             text="Time · screen · Drive",
             anchor="w",
             fill=COLORS["muted"],
             font=FONTS["label"],
         )
-        canvas.create_rectangle(28, 98, 118, 101, fill=COLORS["accent"], outline="")
+        canvas.create_rectangle(18, 72, 88, 74, fill=COLORS["accent"], outline="")
 
     def _bind_button_hover(self, button: tk.Button, normal: str, hover: str) -> None:
         def on_enter(_: object) -> None:
@@ -382,6 +418,25 @@ class TrackerApp:
 
         threading.Thread(target=worker, daemon=True).start()
 
+    def _load_latest_preview(self) -> None:
+        CAPTURES_DIR.mkdir(parents=True, exist_ok=True)
+        files = sorted(CAPTURES_DIR.glob("*.png"), key=lambda p: p.stat().st_mtime)
+        if files:
+            self._show_last_screenshot(files[-1])
+
+    def _show_last_screenshot(self, path) -> None:
+        try:
+            image = Image.open(path).convert("RGB")
+            max_w, max_h = 312, 180
+            image.thumbnail((max_w, max_h), Image.Resampling.LANCZOS)
+            photo = ImageTk.PhotoImage(image)
+            self._preview_image = photo
+            self.preview_label.configure(image=photo, text="", bg=COLORS["bg_soft"])
+            self.preview_name_var.set(path.name)
+        except Exception:
+            self.preview_name_var.set("Could not load preview")
+            self.preview_label.configure(image="", text="Preview unavailable", bg=COLORS["bg_soft"])
+
     def _refresh_labels(self) -> None:
         self.today_var.set(format_duration(self.tracker.today_total_seconds()))
         if self.tracker.is_running:
@@ -464,6 +519,7 @@ class TrackerApp:
                 return
             try:
                 path = take_screenshot()
+                self.root.after(0, lambda p=path: self._show_last_screenshot(p))
                 if not self.uploader.is_connected():
                     self.root.after(
                         0,
