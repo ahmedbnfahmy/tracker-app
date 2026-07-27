@@ -18,5 +18,6 @@ data/time_log.json
 data/uploaded.json
 data/drive_share.json
 data/laps.json
+data/todos.json
 *.png
 .DS_Store

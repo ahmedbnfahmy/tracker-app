@@ -15,6 +15,7 @@ from laps import LapStore
 from screenshot import cleanup_old_day_folders, list_captures, take_screenshot
 from share_dialog import ShareLinkDialog
 from time_tracker import TimeTracker, format_duration
+from todos import TodoStore
 from uploader import DriveUploader
 
 
@@ -52,8 +53,8 @@ class TrackerApp:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
         self.root.title("Tracker")
-        self.root.geometry("360x760")
-        self.root.minsize(340, 720)
+        self.root.geometry("360x900")
+        self.root.minsize(340, 820)
         self.root.resizable(False, False)
         self.root.configure(bg=COLORS["bg"])
         self._icon_images: list[ImageTk.PhotoImage] = []
@@ -63,6 +64,7 @@ class TrackerApp:
         self.tracker = TimeTracker()
         self.uploader = DriveUploader()
         self.laps = LapStore()
+        self.todos = TodoStore()
 
         self._running = False
         self._capture_job: Optional[str] = None
@@ -75,6 +77,7 @@ class TrackerApp:
         self._build_ui()
         self._refresh_labels()
         self._refresh_share_status()
+        self._refresh_todos_list()
         self._refresh_laps_list()
         removed = cleanup_old_day_folders()
         self._load_latest_preview()
@@ -383,6 +386,104 @@ class TrackerApp:
 
         tk.Frame(body, height=1, bg=COLORS["line"]).pack(fill=tk.X, pady=(12, 8))
 
+        todos_header = tk.Frame(body, bg=COLORS["bg"])
+        todos_header.pack(fill=tk.X)
+
+        tk.Label(
+            todos_header,
+            text="TODOS",
+            font=FONTS["label"],
+            fg=COLORS["muted"],
+            bg=COLORS["bg"],
+            anchor="w",
+        ).pack(side=tk.LEFT)
+
+        self.todos_count_var = tk.StringVar(value="0")
+        tk.Label(
+            todos_header,
+            textvariable=self.todos_count_var,
+            font=FONTS["lap_meta"],
+            fg=COLORS["accent"],
+            bg=COLORS["bg"],
+            anchor="e",
+        ).pack(side=tk.RIGHT)
+
+        todo_add = tk.Frame(body, bg=COLORS["bg"])
+        todo_add.pack(fill=tk.X, pady=(6, 0))
+
+        self.todo_entry_var = tk.StringVar()
+        self.todo_entry = tk.Entry(
+            todo_add,
+            textvariable=self.todo_entry_var,
+            font=FONTS["lap_name"],
+            bg=COLORS["bg_soft"],
+            fg=COLORS["ink"],
+            insertbackground=COLORS["ink"],
+            relief=tk.FLAT,
+            highlightthickness=1,
+            highlightbackground=COLORS["line"],
+            highlightcolor=COLORS["accent"],
+        )
+        self.todo_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, ipady=6)
+        self.todo_entry.bind("<Return>", lambda _e: self.add_todo())
+
+        tk.Button(
+            todo_add,
+            text="Add",
+            command=self.add_todo,
+            font=FONTS["button"],
+            bg=COLORS["accent"],
+            fg=COLORS["accent_text"],
+            activebackground=COLORS["accent_dim"],
+            activeforeground=COLORS["accent_text"],
+            relief=tk.FLAT,
+            bd=0,
+            padx=10,
+            pady=5,
+            cursor="hand2",
+            highlightthickness=0,
+        ).pack(side=tk.RIGHT, padx=(8, 0))
+
+        todos_shell = tk.Frame(
+            body,
+            bg=COLORS["bg_mid"],
+            highlightthickness=1,
+            highlightbackground=COLORS["line"],
+        )
+        todos_shell.pack(fill=tk.X, pady=(6, 0))
+
+        self.todos_canvas = tk.Canvas(
+            todos_shell,
+            height=110,
+            bg=COLORS["bg_mid"],
+            highlightthickness=0,
+            bd=0,
+        )
+        self.todos_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        todos_scroll = tk.Scrollbar(
+            todos_shell,
+            orient=tk.VERTICAL,
+            command=self.todos_canvas.yview,
+            troughcolor=COLORS["bg"],
+            bg=COLORS["bg_soft"],
+            activebackground=COLORS["line"],
+            highlightthickness=0,
+            bd=0,
+            width=8,
+        )
+        todos_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        self.todos_canvas.configure(yscrollcommand=todos_scroll.set)
+
+        self.todos_inner = tk.Frame(self.todos_canvas, bg=COLORS["bg_mid"])
+        self._todos_window = self.todos_canvas.create_window((0, 0), window=self.todos_inner, anchor="nw")
+
+        self.todos_inner.bind("<Configure>", self._on_todos_inner_configure)
+        self.todos_canvas.bind("<Configure>", self._on_todos_canvas_configure)
+        self._bind_todos_scroll()
+
+        tk.Frame(body, height=1, bg=COLORS["line"]).pack(fill=tk.X, pady=(12, 8))
+
         laps_header = tk.Frame(body, bg=COLORS["bg"])
         laps_header.pack(fill=tk.X)
 
@@ -415,7 +516,7 @@ class TrackerApp:
 
         self.laps_canvas = tk.Canvas(
             laps_shell,
-            height=132,
+            height=110,
             bg=COLORS["bg_mid"],
             highlightthickness=0,
             bd=0,
@@ -464,7 +565,7 @@ class TrackerApp:
             anchor="w",
         ).pack(fill=tk.X, pady=(1, 6))
 
-        self.preview_frame = tk.Frame(body, bg=COLORS["bg_soft"], height=190)
+        self.preview_frame = tk.Frame(body, bg=COLORS["bg_soft"], height=150)
         self.preview_frame.pack(fill=tk.X)
         self.preview_frame.pack_propagate(False)
 
@@ -752,6 +853,183 @@ class TrackerApp:
             self.state_label.configure(text="Paused", fg=COLORS["accent"])
             self._set_status("Paused — timer frozen", "muted")
         self._refresh_labels()
+
+    def _bind_todos_scroll(self) -> None:
+        def _enter(_event=None) -> None:
+            self.todos_canvas.bind_all("<MouseWheel>", self._on_todos_mousewheel)
+            self.todos_canvas.bind_all("<Button-4>", self._on_todos_linux_scroll)
+            self.todos_canvas.bind_all("<Button-5>", self._on_todos_linux_scroll)
+
+        def _leave(_event=None) -> None:
+            self.todos_canvas.unbind_all("<MouseWheel>")
+            self.todos_canvas.unbind_all("<Button-4>")
+            self.todos_canvas.unbind_all("<Button-5>")
+
+        self.todos_canvas.bind("<Enter>", _enter)
+        self.todos_canvas.bind("<Leave>", _leave)
+
+    def _on_todos_inner_configure(self, _event=None) -> None:
+        self.todos_canvas.configure(scrollregion=self.todos_canvas.bbox("all"))
+
+    def _on_todos_canvas_configure(self, event) -> None:
+        self.todos_canvas.itemconfigure(self._todos_window, width=event.width)
+
+    def _on_todos_mousewheel(self, event) -> None:
+        delta = -1 if event.delta > 0 else 1
+        self.todos_canvas.yview_scroll(delta, "units")
+
+    def _on_todos_linux_scroll(self, event) -> None:
+        self.todos_canvas.yview_scroll(-1 if event.num == 4 else 1, "units")
+
+    def add_todo(self) -> None:
+        text = self.todo_entry_var.get().strip()
+        if not text:
+            self._set_status("Enter a todo first", "error")
+            return
+        self.todos.add(text)
+        self.todo_entry_var.set("")
+        self._refresh_todos_list()
+        self.todos_canvas.yview_moveto(0)
+        self._set_status(f"Todo added: {text}", "ok")
+
+    def _toggle_todo(self, todo_id: str) -> None:
+        item = self.todos.toggle(todo_id)
+        if item is None:
+            self._set_status("Could not update todo", "error")
+            return
+        self._refresh_todos_list()
+        label = "done" if item.get("done") else "reopened"
+        self._set_status(f"Marked {label}: {item.get('text')}", "muted")
+
+    def _delete_todo(self, todo_id: str, text: str) -> None:
+        removed = self.todos.delete(todo_id)
+        if removed is None:
+            self._set_status("Could not delete todo", "error")
+            return
+        self._refresh_todos_list()
+        self._set_status(f"Deleted todo: {text}", "muted")
+
+    def _refresh_todos_list(self) -> None:
+        for child in self.todos_inner.winfo_children():
+            child.destroy()
+
+        items = self.todos.all()
+        self.todos_count_var.set(str(len(items)))
+
+        if not items:
+            empty = tk.Frame(self.todos_inner, bg=COLORS["bg_mid"])
+            empty.pack(fill=tk.BOTH, expand=True, padx=14, pady=28)
+            tk.Label(
+                empty,
+                text="No todos yet",
+                font=FONTS["lap_name"],
+                fg=COLORS["ink"],
+                bg=COLORS["bg_mid"],
+            ).pack(anchor="w")
+            tk.Label(
+                empty,
+                text="Add a task above, then track it with Start / Lap.",
+                font=FONTS["empty"],
+                fg=COLORS["muted"],
+                bg=COLORS["bg_mid"],
+            ).pack(anchor="w", pady=(4, 0))
+            self.todos_canvas.yview_moveto(0)
+            return
+
+        for i, item in enumerate(items, start=1):
+            todo_id = str(item.get("id") or "")
+            text = str(item.get("text") or "Untitled")
+            done = bool(item.get("done"))
+            row_bg = COLORS["bg_soft"] if i % 2 else COLORS["bg_mid"]
+            name_fg = COLORS["muted"] if done else COLORS["ink"]
+            status = "Done" if done else "Open"
+            status_fg = COLORS["ok"] if done else COLORS["accent"]
+
+            first_open = next((j for j, it in enumerate(items, start=1) if not it.get("done")), None)
+            if first_open is not None:
+                bar = COLORS["accent"] if first_open == i else COLORS["line"]
+            else:
+                bar = COLORS["accent"] if i == len(items) else COLORS["line"]
+
+            row = tk.Frame(self.todos_inner, bg=row_bg)
+            row.pack(fill=tk.X)
+
+            accent = tk.Frame(row, width=3, bg=bar)
+            accent.pack(side=tk.LEFT, fill=tk.Y)
+            accent.pack_propagate(False)
+
+            content = tk.Frame(row, bg=row_bg)
+            content.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(10, 12), pady=8)
+
+            top = tk.Frame(content, bg=row_bg)
+            top.pack(fill=tk.X)
+
+            tk.Label(
+                top,
+                text=f"{i:02d}",
+                font=FONTS["lap_index"],
+                fg=COLORS["accent"],
+                bg=row_bg,
+                width=3,
+                anchor="w",
+            ).pack(side=tk.LEFT)
+
+            tk.Label(
+                top,
+                text=text,
+                font=FONTS["lap_name"],
+                fg=name_fg,
+                bg=row_bg,
+                anchor="w",
+            ).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(4, 6))
+
+            delete_btn = tk.Button(
+                top,
+                text="✕",
+                command=lambda tid=todo_id, t=text: self._delete_todo(tid, t),
+                font=("Lato", 10, "bold"),
+                bg=row_bg,
+                fg=COLORS["muted"],
+                activebackground=COLORS["line"],
+                activeforeground=COLORS["error"],
+                disabledforeground=COLORS["idle"],
+                relief=tk.FLAT,
+                bd=0,
+                padx=6,
+                pady=0,
+                cursor="hand2",
+                highlightthickness=0,
+            )
+            delete_btn.pack(side=tk.RIGHT)
+            delete_btn.bind(
+                "<Enter>",
+                lambda _e, b=delete_btn: b.configure(fg=COLORS["error"]),
+            )
+            delete_btn.bind(
+                "<Leave>",
+                lambda _e, b=delete_btn: b.configure(fg=COLORS["muted"]),
+            )
+
+            status_btn = tk.Button(
+                top,
+                text=status,
+                command=lambda tid=todo_id: self._toggle_todo(tid),
+                font=FONTS["lap_meta"],
+                bg=row_bg,
+                fg=status_fg,
+                activebackground=COLORS["line"],
+                activeforeground=COLORS["accent"],
+                relief=tk.FLAT,
+                bd=0,
+                padx=4,
+                pady=0,
+                cursor="hand2",
+                highlightthickness=0,
+            )
+            status_btn.pack(side=tk.RIGHT, padx=(0, 4))
+
+        self.todos_canvas.update_idletasks()
+        self.todos_canvas.configure(scrollregion=self.todos_canvas.bbox("all"))
 
     def _bind_laps_scroll(self) -> None:
         def _enter(_event=None) -> None:
