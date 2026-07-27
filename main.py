@@ -53,8 +53,8 @@ class TrackerApp:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
         self.root.title("Tracker")
-        self.root.geometry("360x900")
-        self.root.minsize(340, 820)
+        self.root.geometry("360x770")
+        self.root.minsize(340, 710)
         self.root.resizable(False, False)
         self.root.configure(bg=COLORS["bg"])
         self._icon_images: list[ImageTk.PhotoImage] = []
@@ -73,6 +73,7 @@ class TrackerApp:
         self._pulse_phase = 0.0
         self._upload_lock = threading.Lock()
         self._sharing = False
+        self._screenshots_enabled = True
 
         self._build_ui()
         self._refresh_labels()
@@ -132,12 +133,8 @@ class TrackerApp:
         self.root.iconname("Tracker")
 
     def _build_ui(self) -> None:
-        header = tk.Canvas(self.root, height=88, highlightthickness=0, bd=0)
-        header.pack(fill=tk.X)
-        self._draw_header(header)
-
-        body = tk.Frame(self.root, bg=COLORS["bg"], padx=18, pady=12)
-        body.pack(fill=tk.BOTH, expand=True)
+        body = tk.Frame(self.root, bg=COLORS["bg"], padx=18, pady=4)
+        body.pack(fill=tk.BOTH, expand=True, pady=(6, 0))
 
         indicator_row = tk.Frame(body, bg=COLORS["bg"])
         # Hidden for now — Idle / Tracking indicator
@@ -347,6 +344,24 @@ class TrackerApp:
         )
         self.lap_btn.pack(side=tk.LEFT, padx=(8, 0))
 
+        self.shots_btn = tk.Button(
+            actions,
+            text="Shots on",
+            command=self.toggle_screenshots,
+            font=FONTS["button"],
+            bg=COLORS["live"],
+            fg=COLORS["accent_text"],
+            activebackground=COLORS["ok"],
+            activeforeground=COLORS["accent_text"],
+            relief=tk.FLAT,
+            bd=0,
+            padx=8,
+            pady=6,
+            cursor="hand2",
+            highlightthickness=0,
+        )
+        self.shots_btn.pack(side=tk.RIGHT)
+
         self.share_btn = tk.Button(
             actions,
             text="Share session",
@@ -454,7 +469,7 @@ class TrackerApp:
 
         self.todos_canvas = tk.Canvas(
             todos_shell,
-            height=110,
+            height=96,
             bg=COLORS["bg_mid"],
             highlightthickness=0,
             bd=0,
@@ -516,7 +531,7 @@ class TrackerApp:
 
         self.laps_canvas = tk.Canvas(
             laps_shell,
-            height=110,
+            height=96,
             bg=COLORS["bg_mid"],
             highlightthickness=0,
             bd=0,
@@ -544,7 +559,7 @@ class TrackerApp:
         self.laps_canvas.bind("<Configure>", self._on_laps_canvas_configure)
         self._bind_laps_scroll()
 
-        tk.Frame(body, height=1, bg=COLORS["line"]).pack(fill=tk.X, pady=(12, 8))
+        tk.Frame(body, height=1, bg=COLORS["line"]).pack(fill=tk.X, pady=(10, 6))
 
         tk.Label(
             body,
@@ -563,10 +578,10 @@ class TrackerApp:
             fg=COLORS["ink"],
             bg=COLORS["bg"],
             anchor="w",
-        ).pack(fill=tk.X, pady=(1, 6))
+        ).pack(fill=tk.X, pady=(1, 4))
 
-        self.preview_frame = tk.Frame(body, bg=COLORS["bg_soft"], height=150)
-        self.preview_frame.pack(fill=tk.X)
+        self.preview_frame = tk.Frame(body, bg=COLORS["bg_soft"], height=170)
+        self.preview_frame.pack(fill=tk.BOTH, expand=True)
         self.preview_frame.pack_propagate(False)
 
         self.preview_label = tk.Label(
@@ -577,31 +592,6 @@ class TrackerApp:
             bg=COLORS["bg_soft"],
         )
         self.preview_label.pack(expand=True, fill=tk.BOTH)
-
-    def _draw_header(self, canvas: tk.Canvas) -> None:
-        width = 360
-        height = 88
-        bands = ("#15202e", "#1a2332", "#1f2a3d", "#243044")
-        band_h = height // len(bands)
-        for i, color in enumerate(bands):
-            canvas.create_rectangle(0, i * band_h, width, (i + 1) * band_h + 2, fill=color, outline="")
-        canvas.create_text(
-            18,
-            32,
-            text="Tracker",
-            anchor="w",
-            fill=COLORS["ink"],
-            font=FONTS["brand"],
-        )
-        canvas.create_text(
-            18,
-            58,
-            text="Time · screen · Drive",
-            anchor="w",
-            fill=COLORS["muted"],
-            font=FONTS["label"],
-        )
-        canvas.create_rectangle(18, 72, 88, 74, fill=COLORS["accent"], outline="")
 
     def _bind_button_hover(self, button: tk.Button, normal: str, hover: str) -> None:
         def on_enter(_: object) -> None:
@@ -781,7 +771,7 @@ class TrackerApp:
     def _show_last_screenshot(self, path) -> None:
         try:
             image = Image.open(path).convert("RGB")
-            max_w, max_h = 312, 180
+            max_w, max_h = 312, 160
             image.thumbnail((max_w, max_h), Image.Resampling.LANCZOS)
             photo = ImageTk.PhotoImage(image)
             self._preview_image = photo
@@ -841,7 +831,8 @@ class TrackerApp:
             self.lap_btn.configure(state=tk.NORMAL)
             self._start_pulse()
             self._set_status("Resumed", "live")
-            self._schedule_next_capture()
+            if self._screenshots_enabled:
+                self._schedule_next_capture()
         else:
             self.tracker.pause()
             if self._capture_job is not None:
@@ -853,6 +844,38 @@ class TrackerApp:
             self.state_label.configure(text="Paused", fg=COLORS["accent"])
             self._set_status("Paused — timer frozen", "muted")
         self._refresh_labels()
+
+    def _set_shots_button(self) -> None:
+        if self._screenshots_enabled:
+            self.shots_btn.configure(
+                text="Shots on",
+                bg=COLORS["live"],
+                fg=COLORS["accent_text"],
+                activebackground=COLORS["ok"],
+            )
+        else:
+            self.shots_btn.configure(
+                text="Shots off",
+                bg=COLORS["bg_soft"],
+                fg=COLORS["ink"],
+                activebackground=COLORS["line"],
+            )
+
+    def toggle_screenshots(self) -> None:
+        self._screenshots_enabled = not self._screenshots_enabled
+        self._set_shots_button()
+
+        if not self._screenshots_enabled:
+            if self._capture_job is not None:
+                self.root.after_cancel(self._capture_job)
+                self._capture_job = None
+            self._set_status("Screenshots off — timer still runs", "muted")
+            return
+
+        self._set_status("Screenshots on", "ok")
+        if self._running and not self.tracker.is_paused:
+            self._run_capture_async()
+            self._schedule_next_capture()
 
     def _bind_todos_scroll(self) -> None:
         def _enter(_event=None) -> None:
@@ -1210,12 +1233,15 @@ class TrackerApp:
         self.stop_btn.configure(state=tk.NORMAL, bg=COLORS["bg_soft"])
         self.lap_btn.configure(state=tk.NORMAL, bg=COLORS["bg_soft"])
         self._set_pause_button(False)
-        mode = "and Drive" if self._sharing else "locally"
-        self._set_status(f"Capturing first screenshot ({mode})…", "live")
         self._start_pulse()
         self._refresh_labels()
-        self._run_capture_async()
-        self._schedule_next_capture()
+        if self._screenshots_enabled:
+            mode = "and Drive" if self._sharing else "locally"
+            self._set_status(f"Capturing first screenshot ({mode})…", "live")
+            self._run_capture_async()
+            self._schedule_next_capture()
+        else:
+            self._set_status("Tracking — screenshots off", "live")
 
     def stop_tracking(self) -> None:
         if not self._running:
@@ -1235,19 +1261,21 @@ class TrackerApp:
         self._refresh_laps_list()
 
     def _schedule_next_capture(self) -> None:
-        if not self._running or self.tracker.is_paused:
+        if not self._running or self.tracker.is_paused or not self._screenshots_enabled:
             return
         interval_ms = max(1, SCREENSHOT_INTERVAL_SECONDS) * 1000
         self._capture_job = self.root.after(interval_ms, self._on_capture_due)
 
     def _on_capture_due(self) -> None:
         self._capture_job = None
-        if not self._running or self.tracker.is_paused:
+        if not self._running or self.tracker.is_paused or not self._screenshots_enabled:
             return
         self._run_capture_async()
         self._schedule_next_capture()
 
     def _run_capture_async(self) -> None:
+        if not self._screenshots_enabled:
+            return
         def worker() -> None:
             if not self._upload_lock.acquire(blocking=False):
                 self.root.after(0, lambda: self._set_status("Previous capture still in progress", "muted"))

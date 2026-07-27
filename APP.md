@@ -1,12 +1,15 @@
 # Tracker
 
 ## Summary
-Tracker tracks work time and captures your screen every 10 minutes (saved locally). Optional **Share session** can upload screenshots to Google Drive via an Apps Script web-app link — the desktop app does not store Google credentials.
+Tracker tracks work time and, by default, captures your screen every 10 minutes (saved locally). Screenshots are optional and can be turned off anytime. Optional **Share session** can upload screenshots to Google Drive via an Apps Script web-app link — the desktop app does not store Google credentials.
 
 ## Features
 
 ### Start / Stop tracking
-Timer + screenshots only while a session is active.
+Timer runs while a session is active. Screenshots run only when **Shots on** is enabled.
+
+### Screenshots on / off
+Enabled by default (**Shots on**). Click the button to turn captures off without stopping the timer; click again to turn them back on.
 
 ### Pause / Resume
 Freeze the session timer without ending the session. Screenshots pause too; Resume continues from the same elapsed time.
