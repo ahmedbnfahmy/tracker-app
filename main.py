@@ -5,6 +5,7 @@ import math
 import subprocess
 import threading
 import tkinter as tk
+from pathlib import Path
 from typing import Optional
 
 from PIL import Image, ImageTk
@@ -38,8 +39,8 @@ COLORS = {
 FONTS = {
     "brand": ("Lato", 20, "bold"),
     "label": ("Lato", 9),
-    "value": ("DejaVu Sans Mono", 18),
-    "session": ("DejaVu Sans Mono", 13),
+    "value": ("DejaVu Sans Mono", 28),
+    "session": ("DejaVu Sans Mono", 24),
     "status": ("Lato", 9),
     "button": ("Lato", 10, "bold"),
     "lap_name": ("Lato", 10),
@@ -53,12 +54,13 @@ class TrackerApp:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
         self.root.title("Tracker")
-        self.root.geometry("360x770")
-        self.root.minsize(340, 710)
+        self.root.geometry("360x540")
+        self.root.minsize(340, 500)
         self.root.resizable(False, False)
         self.root.configure(bg=COLORS["bg"])
         self._icon_images: list[ImageTk.PhotoImage] = []
         self._preview_image: Optional[ImageTk.PhotoImage] = None
+        self._preview_path: Optional[Path] = None
         self._apply_window_icon()
 
         self.tracker = TimeTracker()
@@ -74,6 +76,10 @@ class TrackerApp:
         self._upload_lock = threading.Lock()
         self._sharing = False
         self._screenshots_enabled = True
+        self._sidebar_open = False
+        self._main_width = 360
+        self._sidebar_width = 320
+        self._window_height = 540
 
         self._build_ui()
         self._refresh_labels()
@@ -133,10 +139,23 @@ class TrackerApp:
         self.root.iconname("Tracker")
 
     def _build_ui(self) -> None:
-        body = tk.Frame(self.root, bg=COLORS["bg"], padx=18, pady=4)
-        body.pack(fill=tk.BOTH, expand=True, pady=(6, 0))
+        shell = tk.Frame(self.root, bg=COLORS["bg"])
+        shell.pack(fill=tk.BOTH, expand=True)
 
-        indicator_row = tk.Frame(body, bg=COLORS["bg"])
+        main = tk.Frame(shell, bg=COLORS["bg"], padx=18, pady=2)
+        main.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, pady=(6, 0))
+        self._main_panel = main
+
+        self.sidebar = tk.Frame(
+            shell,
+            bg=COLORS["bg_mid"],
+            width=self._sidebar_width,
+            highlightthickness=1,
+            highlightbackground=COLORS["line"],
+        )
+        self.sidebar.pack_propagate(False)
+
+        indicator_row = tk.Frame(main, bg=COLORS["bg"])
         # Hidden for now — Idle / Tracking indicator
         # indicator_row.pack(fill=tk.X, pady=(0, 8))
 
@@ -162,7 +181,7 @@ class TrackerApp:
 
         self.drive_var = tk.StringVar(value="Share: off — local only")
         self.drive_label = tk.Label(
-            body,
+            main,
             textvariable=self.drive_var,
             font=FONTS["label"],
             fg=COLORS["muted"],
@@ -174,7 +193,7 @@ class TrackerApp:
 
         self.public_link_var = tk.StringVar(value="Public link: —")
         self.public_link_label = tk.Label(
-            body,
+            main,
             textvariable=self.public_link_var,
             font=FONTS["label"],
             fg=COLORS["muted"],
@@ -185,7 +204,7 @@ class TrackerApp:
         )
         # self.public_link_label.pack(fill=tk.X, pady=(0, 4))
 
-        link_actions = tk.Frame(body, bg=COLORS["bg"])
+        link_actions = tk.Frame(main, bg=COLORS["bg"])
         # link_actions.pack(fill=tk.X, pady=(0, 8))
 
         self.copy_link_btn = tk.Button(
@@ -223,7 +242,7 @@ class TrackerApp:
         # self.open_link_btn.pack(side=tk.LEFT, padx=(6, 0))
 
         tk.Label(
-            body,
+            main,
             text="TIME TODAY",
             font=FONTS["label"],
             fg=COLORS["muted"],
@@ -233,18 +252,18 @@ class TrackerApp:
 
         self.today_var = tk.StringVar(value="0h 00m 00s")
         tk.Label(
-            body,
+            main,
             textvariable=self.today_var,
             font=FONTS["value"],
             fg=COLORS["ink"],
             bg=COLORS["bg"],
             anchor="w",
-        ).pack(fill=tk.X, pady=(1, 10))
+        ).pack(fill=tk.X, pady=(2, 8))
 
-        tk.Frame(body, height=1, bg=COLORS["line"]).pack(fill=tk.X, pady=(0, 10))
+        tk.Frame(main, height=1, bg=COLORS["line"]).pack(fill=tk.X, pady=(0, 8))
 
         tk.Label(
-            body,
+            main,
             text="SESSION",
             font=FONTS["label"],
             fg=COLORS["muted"],
@@ -254,15 +273,15 @@ class TrackerApp:
 
         self.session_var = tk.StringVar(value="0h 00m 00s")
         tk.Label(
-            body,
+            main,
             textvariable=self.session_var,
             font=FONTS["session"],
             fg=COLORS["accent"],
             bg=COLORS["bg"],
             anchor="w",
-        ).pack(fill=tk.X, pady=(1, 12))
+        ).pack(fill=tk.X, pady=(2, 8))
 
-        actions = tk.Frame(body, bg=COLORS["bg"])
+        actions = tk.Frame(main, bg=COLORS["bg"])
         actions.pack(fill=tk.X)
 
         self.start_btn = tk.Button(
@@ -287,7 +306,7 @@ class TrackerApp:
         self.stop_btn = tk.Button(
             actions,
             text="Stop",
-            command=self.stop_tracking,
+            command=self.save_lap,
             font=FONTS["button"],
             bg=COLORS["bg_soft"],
             fg=COLORS["ink"],
@@ -323,26 +342,6 @@ class TrackerApp:
             state=tk.DISABLED,
         )
         self.pause_btn.pack(side=tk.LEFT, padx=(8, 0))
-
-        self.lap_btn = tk.Button(
-            actions,
-            text="Lap",
-            command=self.save_lap,
-            font=FONTS["button"],
-            bg=COLORS["bg_soft"],
-            fg=COLORS["ink"],
-            activebackground=COLORS["line"],
-            activeforeground=COLORS["ink"],
-            disabledforeground=COLORS["idle"],
-            relief=tk.FLAT,
-            bd=0,
-            padx=10,
-            pady=6,
-            cursor="hand2",
-            highlightthickness=0,
-            state=tk.DISABLED,
-        )
-        self.lap_btn.pack(side=tk.LEFT, padx=(8, 0))
 
         self.shots_btn = tk.Button(
             actions,
@@ -381,14 +380,35 @@ class TrackerApp:
         # Hidden for now — keep widget for later re-enable
         # self.share_btn.pack(side=tk.RIGHT)
 
+        lists_row = tk.Frame(main, bg=COLORS["bg"])
+        lists_row.pack(fill=tk.X, pady=(6, 0))
+
+        self.lists_btn = tk.Button(
+            lists_row,
+            text="Show lists",
+            command=self.toggle_sidebar,
+            font=FONTS["button"],
+            bg=COLORS["bg_soft"],
+            fg=COLORS["ink"],
+            activebackground=COLORS["line"],
+            activeforeground=COLORS["ink"],
+            relief=tk.FLAT,
+            bd=0,
+            padx=10,
+            pady=6,
+            cursor="hand2",
+            highlightthickness=0,
+        )
+        self.lists_btn.pack(fill=tk.X)
+
         self._bind_button_hover(self.start_btn, COLORS["accent"], COLORS["accent_dim"])
         self._bind_button_hover(self.stop_btn, COLORS["bg_soft"], COLORS["line"])
         self._bind_button_hover(self.pause_btn, COLORS["bg_soft"], COLORS["line"])
-        self._bind_button_hover(self.lap_btn, COLORS["bg_soft"], COLORS["line"])
+        self._bind_button_hover(self.lists_btn, COLORS["bg_soft"], COLORS["line"])
 
         self.status_var = tk.StringVar(value="Ready to track")
         self.status_label = tk.Label(
-            body,
+            main,
             textvariable=self.status_var,
             font=FONTS["status"],
             fg=COLORS["muted"],
@@ -397,117 +417,96 @@ class TrackerApp:
             justify=tk.LEFT,
             anchor="w",
         )
-        self.status_label.pack(fill=tk.X, pady=(14, 0))
+        self.status_label.pack(fill=tk.X, pady=(8, 0))
 
-        tk.Frame(body, height=1, bg=COLORS["line"]).pack(fill=tk.X, pady=(12, 8))
-
-        todos_header = tk.Frame(body, bg=COLORS["bg"])
-        todos_header.pack(fill=tk.X)
+        tk.Frame(main, height=1, bg=COLORS["line"]).pack(fill=tk.X, pady=(6, 4))
 
         tk.Label(
-            todos_header,
-            text="TODOS",
+            main,
+            text="LAST SCREENSHOT",
             font=FONTS["label"],
             fg=COLORS["muted"],
             bg=COLORS["bg"],
             anchor="w",
+        ).pack(fill=tk.X)
+
+        self.preview_name_var = tk.StringVar(value="No screenshots yet")
+        self.preview_name_label = tk.Label(
+            main,
+            textvariable=self.preview_name_var,
+            font=FONTS["label"],
+            fg=COLORS["muted"],
+            bg=COLORS["bg"],
+            anchor="w",
+            cursor="arrow",
+        )
+        self.preview_name_label.pack(fill=tk.X, pady=(1, 2))
+        self.preview_name_label.bind("<Button-1>", lambda _e: self._open_screenshot_dir())
+
+        self.preview_frame = tk.Frame(main, bg=COLORS["bg_soft"], height=205)
+        self.preview_frame.pack(fill=tk.X, pady=(0, 0))
+        self.preview_frame.pack_propagate(False)
+
+        self.preview_label = tk.Label(
+            self.preview_frame,
+            text="Capture will show here",
+            font=FONTS["status"],
+            fg=COLORS["muted"],
+            bg=COLORS["bg_soft"],
+        )
+        self.preview_label.pack(expand=True, fill=tk.BOTH)
+
+        self._build_sidebar()
+
+    def _build_sidebar(self) -> None:
+        side = tk.Frame(self.sidebar, bg=COLORS["bg_mid"], padx=12, pady=10)
+        side.pack(fill=tk.BOTH, expand=True)
+
+        side_top = tk.Frame(side, bg=COLORS["bg_mid"])
+        side_top.pack(fill=tk.X, pady=(0, 8))
+
+        tk.Label(
+            side_top,
+            text="LISTS",
+            font=FONTS["label"],
+            fg=COLORS["muted"],
+            bg=COLORS["bg_mid"],
+            anchor="w",
         ).pack(side=tk.LEFT)
 
-        self.todos_count_var = tk.StringVar(value="0")
-        tk.Label(
-            todos_header,
-            textvariable=self.todos_count_var,
-            font=FONTS["lap_meta"],
-            fg=COLORS["accent"],
-            bg=COLORS["bg"],
-            anchor="e",
-        ).pack(side=tk.RIGHT)
-
-        todo_add = tk.Frame(body, bg=COLORS["bg"])
-        todo_add.pack(fill=tk.X, pady=(6, 0))
-
-        self.todo_entry_var = tk.StringVar()
-        self.todo_entry = tk.Entry(
-            todo_add,
-            textvariable=self.todo_entry_var,
-            font=FONTS["lap_name"],
-            bg=COLORS["bg_soft"],
-            fg=COLORS["ink"],
-            insertbackground=COLORS["ink"],
-            relief=tk.FLAT,
-            highlightthickness=1,
-            highlightbackground=COLORS["line"],
-            highlightcolor=COLORS["accent"],
-        )
-        self.todo_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, ipady=6)
-        self.todo_entry.bind("<Return>", lambda _e: self.add_todo())
-
         tk.Button(
-            todo_add,
-            text="Add",
-            command=self.add_todo,
-            font=FONTS["button"],
-            bg=COLORS["accent"],
-            fg=COLORS["accent_text"],
-            activebackground=COLORS["accent_dim"],
-            activeforeground=COLORS["accent_text"],
+            side_top,
+            text="✕",
+            command=self.toggle_sidebar,
+            font=("Lato", 10, "bold"),
+            bg=COLORS["bg_mid"],
+            fg=COLORS["muted"],
+            activebackground=COLORS["line"],
+            activeforeground=COLORS["error"],
             relief=tk.FLAT,
             bd=0,
-            padx=10,
-            pady=5,
+            padx=6,
+            pady=0,
             cursor="hand2",
             highlightthickness=0,
-        ).pack(side=tk.RIGHT, padx=(8, 0))
+        ).pack(side=tk.RIGHT)
 
-        todos_shell = tk.Frame(
-            body,
-            bg=COLORS["bg_mid"],
-            highlightthickness=1,
-            highlightbackground=COLORS["line"],
-        )
-        todos_shell.pack(fill=tk.X, pady=(6, 0))
+        # Equal-height list panels: only the two shells share expand weight.
+        lists_body = tk.Frame(side, bg=COLORS["bg_mid"])
+        lists_body.pack(fill=tk.BOTH, expand=True)
+        lists_body.columnconfigure(0, weight=1)
+        lists_body.rowconfigure(1, weight=1, uniform="list_panels")
+        lists_body.rowconfigure(5, weight=1, uniform="list_panels")
 
-        self.todos_canvas = tk.Canvas(
-            todos_shell,
-            height=96,
-            bg=COLORS["bg_mid"],
-            highlightthickness=0,
-            bd=0,
-        )
-        self.todos_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-
-        todos_scroll = tk.Scrollbar(
-            todos_shell,
-            orient=tk.VERTICAL,
-            command=self.todos_canvas.yview,
-            troughcolor=COLORS["bg"],
-            bg=COLORS["bg_soft"],
-            activebackground=COLORS["line"],
-            highlightthickness=0,
-            bd=0,
-            width=8,
-        )
-        todos_scroll.pack(side=tk.RIGHT, fill=tk.Y)
-        self.todos_canvas.configure(yscrollcommand=todos_scroll.set)
-
-        self.todos_inner = tk.Frame(self.todos_canvas, bg=COLORS["bg_mid"])
-        self._todos_window = self.todos_canvas.create_window((0, 0), window=self.todos_inner, anchor="nw")
-
-        self.todos_inner.bind("<Configure>", self._on_todos_inner_configure)
-        self.todos_canvas.bind("<Configure>", self._on_todos_canvas_configure)
-        self._bind_todos_scroll()
-
-        tk.Frame(body, height=1, bg=COLORS["line"]).pack(fill=tk.X, pady=(12, 8))
-
-        laps_header = tk.Frame(body, bg=COLORS["bg"])
-        laps_header.pack(fill=tk.X)
+        laps_header = tk.Frame(lists_body, bg=COLORS["bg_mid"])
+        laps_header.grid(row=0, column=0, sticky="ew")
 
         tk.Label(
             laps_header,
             text="TODAY'S LAPS",
             font=FONTS["label"],
             fg=COLORS["muted"],
-            bg=COLORS["bg"],
+            bg=COLORS["bg_mid"],
             anchor="w",
         ).pack(side=tk.LEFT)
 
@@ -517,22 +516,21 @@ class TrackerApp:
             textvariable=self.laps_count_var,
             font=FONTS["lap_meta"],
             fg=COLORS["accent"],
-            bg=COLORS["bg"],
+            bg=COLORS["bg_mid"],
             anchor="e",
         ).pack(side=tk.RIGHT)
 
         laps_shell = tk.Frame(
-            body,
-            bg=COLORS["bg_mid"],
+            lists_body,
+            bg=COLORS["bg"],
             highlightthickness=1,
             highlightbackground=COLORS["line"],
         )
-        laps_shell.pack(fill=tk.X, pady=(6, 0))
+        laps_shell.grid(row=1, column=0, sticky="nsew", pady=(4, 0))
 
         self.laps_canvas = tk.Canvas(
             laps_shell,
-            height=96,
-            bg=COLORS["bg_mid"],
+            bg=COLORS["bg"],
             highlightthickness=0,
             bd=0,
         )
@@ -552,46 +550,129 @@ class TrackerApp:
         laps_scroll.pack(side=tk.RIGHT, fill=tk.Y)
         self.laps_canvas.configure(yscrollcommand=laps_scroll.set)
 
-        self.laps_inner = tk.Frame(self.laps_canvas, bg=COLORS["bg_mid"])
+        self.laps_inner = tk.Frame(self.laps_canvas, bg=COLORS["bg"])
         self._laps_window = self.laps_canvas.create_window((0, 0), window=self.laps_inner, anchor="nw")
 
         self.laps_inner.bind("<Configure>", self._on_laps_inner_configure)
         self.laps_canvas.bind("<Configure>", self._on_laps_canvas_configure)
         self._bind_laps_scroll()
 
-        tk.Frame(body, height=1, bg=COLORS["line"]).pack(fill=tk.X, pady=(10, 6))
+        tk.Frame(lists_body, height=1, bg=COLORS["line"]).grid(row=2, column=0, sticky="ew", pady=8)
+
+        todos_header = tk.Frame(lists_body, bg=COLORS["bg_mid"])
+        todos_header.grid(row=3, column=0, sticky="ew")
 
         tk.Label(
-            body,
-            text="LAST SCREENSHOT",
+            todos_header,
+            text="TODOS",
             font=FONTS["label"],
             fg=COLORS["muted"],
-            bg=COLORS["bg"],
+            bg=COLORS["bg_mid"],
             anchor="w",
-        ).pack(fill=tk.X)
+        ).pack(side=tk.LEFT)
 
-        self.preview_name_var = tk.StringVar(value="No screenshots yet")
+        self.todos_count_var = tk.StringVar(value="0")
         tk.Label(
-            body,
-            textvariable=self.preview_name_var,
-            font=FONTS["label"],
-            fg=COLORS["ink"],
-            bg=COLORS["bg"],
-            anchor="w",
-        ).pack(fill=tk.X, pady=(1, 4))
+            todos_header,
+            textvariable=self.todos_count_var,
+            font=FONTS["lap_meta"],
+            fg=COLORS["accent"],
+            bg=COLORS["bg_mid"],
+            anchor="e",
+        ).pack(side=tk.RIGHT)
 
-        self.preview_frame = tk.Frame(body, bg=COLORS["bg_soft"], height=170)
-        self.preview_frame.pack(fill=tk.BOTH, expand=True)
-        self.preview_frame.pack_propagate(False)
+        todo_add = tk.Frame(lists_body, bg=COLORS["bg_mid"])
+        todo_add.grid(row=4, column=0, sticky="ew", pady=(4, 0))
 
-        self.preview_label = tk.Label(
-            self.preview_frame,
-            text="Capture will show here",
-            font=FONTS["status"],
-            fg=COLORS["muted"],
+        self.todo_entry_var = tk.StringVar()
+        self.todo_entry = tk.Entry(
+            todo_add,
+            textvariable=self.todo_entry_var,
+            font=FONTS["lap_name"],
             bg=COLORS["bg_soft"],
+            fg=COLORS["ink"],
+            insertbackground=COLORS["ink"],
+            relief=tk.FLAT,
+            highlightthickness=1,
+            highlightbackground=COLORS["line"],
+            highlightcolor=COLORS["accent"],
         )
-        self.preview_label.pack(expand=True, fill=tk.BOTH)
+        self.todo_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, ipady=5)
+        self.todo_entry.bind("<Return>", lambda _e: self.add_todo())
+
+        tk.Button(
+            todo_add,
+            text="Add",
+            command=self.add_todo,
+            font=FONTS["button"],
+            bg=COLORS["accent"],
+            fg=COLORS["accent_text"],
+            activebackground=COLORS["accent_dim"],
+            activeforeground=COLORS["accent_text"],
+            relief=tk.FLAT,
+            bd=0,
+            padx=10,
+            pady=4,
+            cursor="hand2",
+            highlightthickness=0,
+        ).pack(side=tk.RIGHT, padx=(8, 0))
+
+        todos_shell = tk.Frame(
+            lists_body,
+            bg=COLORS["bg"],
+            highlightthickness=1,
+            highlightbackground=COLORS["line"],
+        )
+        todos_shell.grid(row=5, column=0, sticky="nsew", pady=(4, 0))
+
+        self.todos_canvas = tk.Canvas(
+            todos_shell,
+            bg=COLORS["bg"],
+            highlightthickness=0,
+            bd=0,
+        )
+        self.todos_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        todos_scroll = tk.Scrollbar(
+            todos_shell,
+            orient=tk.VERTICAL,
+            command=self.todos_canvas.yview,
+            troughcolor=COLORS["bg"],
+            bg=COLORS["bg_soft"],
+            activebackground=COLORS["line"],
+            highlightthickness=0,
+            bd=0,
+            width=8,
+        )
+        todos_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        self.todos_canvas.configure(yscrollcommand=todos_scroll.set)
+
+        self.todos_inner = tk.Frame(self.todos_canvas, bg=COLORS["bg"])
+        self._todos_window = self.todos_canvas.create_window((0, 0), window=self.todos_inner, anchor="nw")
+
+        self.todos_inner.bind("<Configure>", self._on_todos_inner_configure)
+        self.todos_canvas.bind("<Configure>", self._on_todos_canvas_configure)
+        self._bind_todos_scroll()
+
+    def toggle_sidebar(self) -> None:
+        if self._sidebar_open:
+            self.sidebar.pack_forget()
+            self._sidebar_open = False
+            self.lists_btn.configure(text="Show lists", bg=COLORS["bg_soft"], fg=COLORS["ink"])
+            self.root.geometry(f"{self._main_width}x{self._window_height}")
+            self.root.minsize(340, 500)
+            self._set_status("Lists hidden", "muted")
+            return
+
+        self.sidebar.pack(side=tk.RIGHT, fill=tk.BOTH)
+        self._sidebar_open = True
+        self.lists_btn.configure(text="Hide lists", bg=COLORS["accent"], fg=COLORS["accent_text"])
+        width = self._main_width + self._sidebar_width
+        self.root.geometry(f"{width}x{self._window_height}")
+        self.root.minsize(width, 500)
+        self._refresh_todos_list()
+        self._refresh_laps_list()
+        self._set_status("Lists open", "ok")
 
     def _bind_button_hover(self, button: tk.Button, normal: str, hover: str) -> None:
         def on_enter(_: object) -> None:
@@ -770,16 +851,38 @@ class TrackerApp:
 
     def _show_last_screenshot(self, path) -> None:
         try:
+            path = Path(path)
             image = Image.open(path).convert("RGB")
-            max_w, max_h = 312, 160
+            max_w, max_h = 312, 195
             image.thumbnail((max_w, max_h), Image.Resampling.LANCZOS)
             photo = ImageTk.PhotoImage(image)
             self._preview_image = photo
+            self._preview_path = path
             self.preview_label.configure(image=photo, text="", bg=COLORS["bg_soft"])
             self.preview_name_var.set(path.name)
+            self.preview_name_label.configure(fg=COLORS["accent"], cursor="hand2")
         except Exception:
+            self._preview_path = None
             self.preview_name_var.set("Could not load preview")
+            self.preview_name_label.configure(fg=COLORS["muted"], cursor="arrow")
             self.preview_label.configure(image="", text="Preview unavailable", bg=COLORS["bg_soft"])
+
+    def _open_screenshot_dir(self) -> None:
+        if self._preview_path is not None and self._preview_path.exists():
+            folder = self._preview_path.parent
+        else:
+            folder = CAPTURES_DIR
+            folder.mkdir(parents=True, exist_ok=True)
+
+        try:
+            subprocess.Popen(
+                ["xdg-open", str(folder)],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            self._set_status(f"Opened {folder}", "ok")
+        except Exception as exc:
+            self._set_status(f"Could not open folder — {exc}", "error")
 
     def _refresh_labels(self) -> None:
         self.today_var.set(format_duration(self.tracker.today_total_seconds()))
@@ -828,7 +931,7 @@ class TrackerApp:
         if self.tracker.is_paused:
             self.tracker.resume()
             self._set_pause_button(False)
-            self.lap_btn.configure(state=tk.NORMAL)
+            self.stop_btn.configure(state=tk.NORMAL)
             self._start_pulse()
             self._set_status("Resumed", "live")
             if self._screenshots_enabled:
@@ -839,7 +942,7 @@ class TrackerApp:
                 self.root.after_cancel(self._capture_job)
                 self._capture_job = None
             self._set_pause_button(True)
-            self.lap_btn.configure(state=tk.DISABLED)
+            self.stop_btn.configure(state=tk.DISABLED)
             self._stop_pulse()
             self.state_label.configure(text="Paused", fg=COLORS["accent"])
             self._set_status("Paused — timer frozen", "muted")
@@ -940,21 +1043,21 @@ class TrackerApp:
         self.todos_count_var.set(str(len(items)))
 
         if not items:
-            empty = tk.Frame(self.todos_inner, bg=COLORS["bg_mid"])
-            empty.pack(fill=tk.BOTH, expand=True, padx=14, pady=28)
+            empty = tk.Frame(self.todos_inner, bg=COLORS["bg"])
+            empty.pack(fill=tk.BOTH, expand=True, padx=12, pady=14)
             tk.Label(
                 empty,
                 text="No todos yet",
                 font=FONTS["lap_name"],
                 fg=COLORS["ink"],
-                bg=COLORS["bg_mid"],
+                bg=COLORS["bg"],
             ).pack(anchor="w")
             tk.Label(
                 empty,
-                text="Add a task above, then track it with Start / Lap.",
+                text="Add a task above, then track it with Start / Stop.",
                 font=FONTS["empty"],
                 fg=COLORS["muted"],
-                bg=COLORS["bg_mid"],
+                bg=COLORS["bg"],
             ).pack(anchor="w", pady=(4, 0))
             self.todos_canvas.yview_moveto(0)
             return
@@ -963,7 +1066,7 @@ class TrackerApp:
             todo_id = str(item.get("id") or "")
             text = str(item.get("text") or "Untitled")
             done = bool(item.get("done"))
-            row_bg = COLORS["bg_soft"] if i % 2 else COLORS["bg_mid"]
+            row_bg = COLORS["bg_soft"] if i % 2 else COLORS["bg"]
             name_fg = COLORS["muted"] if done else COLORS["ink"]
             status = "Done" if done else "Open"
             status_fg = COLORS["ok"] if done else COLORS["accent"]
@@ -982,7 +1085,7 @@ class TrackerApp:
             accent.pack_propagate(False)
 
             content = tk.Frame(row, bg=row_bg)
-            content.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(10, 12), pady=8)
+            content.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(8, 10), pady=5)
 
             top = tk.Frame(content, bg=row_bg)
             top.pack(fill=tk.X)
@@ -1098,21 +1201,21 @@ class TrackerApp:
         self.laps_count_var.set(str(len(laps)))
 
         if not laps:
-            empty = tk.Frame(self.laps_inner, bg=COLORS["bg_mid"])
-            empty.pack(fill=tk.BOTH, expand=True, padx=14, pady=28)
+            empty = tk.Frame(self.laps_inner, bg=COLORS["bg"])
+            empty.pack(fill=tk.BOTH, expand=True, padx=12, pady=14)
             tk.Label(
                 empty,
                 text="No laps yet",
                 font=FONTS["lap_name"],
                 fg=COLORS["ink"],
-                bg=COLORS["bg_mid"],
+                bg=COLORS["bg"],
             ).pack(anchor="w")
             tk.Label(
                 empty,
-                text="Start tracking, then hit Lap to name a task.",
+                text="Start tracking, then hit Stop to name a task.",
                 font=FONTS["empty"],
                 fg=COLORS["muted"],
-                bg=COLORS["bg_mid"],
+                bg=COLORS["bg"],
             ).pack(anchor="w", pady=(4, 0))
             self.laps_canvas.yview_moveto(0)
             return
@@ -1120,7 +1223,7 @@ class TrackerApp:
         for i, lap in enumerate(laps, start=1):
             name = str(lap.get("name") or "Untitled")
             seconds = int(lap.get("seconds") or 0)
-            row_bg = COLORS["bg_soft"] if i % 2 else COLORS["bg_mid"]
+            row_bg = COLORS["bg_soft"] if i % 2 else COLORS["bg"]
 
             row = tk.Frame(self.laps_inner, bg=row_bg)
             row.pack(fill=tk.X)
@@ -1130,7 +1233,7 @@ class TrackerApp:
             accent.pack_propagate(False)
 
             content = tk.Frame(row, bg=row_bg)
-            content.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(10, 12), pady=8)
+            content.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(8, 10), pady=5)
 
             top = tk.Frame(content, bg=row_bg)
             top.pack(fill=tk.X)
@@ -1202,27 +1305,38 @@ class TrackerApp:
         self._set_status(f"Deleted lap: {name}", "muted")
 
     def save_lap(self) -> None:
+        """Stop button: name the segment, save it to today's laps, end tracking."""
         if not self._running or not self.tracker.is_running:
-            self._set_status("Start tracking before saving a lap", "error")
+            self._set_status("Start tracking before stopping", "error")
             return
         if self.tracker.is_paused:
-            self._set_status("Resume before saving a lap", "error")
+            self._set_status("Resume before stopping", "error")
             return
 
         elapsed = format_duration(self.tracker.session_elapsed_seconds())
         dialog = LapNameDialog(self.root, elapsed_label=elapsed)
         self.root.wait_window(dialog)
         if not dialog.result_name:
-            self._set_status("Lap cancelled", "muted")
+            self._set_status("Stop cancelled", "muted")
             return
 
-        seconds, name = self.tracker.lap(dialog.result_name)
+        name = dialog.result_name
+        seconds = self.tracker.stop()
         self.laps.add_lap(name, seconds)
-        self._set_pause_button(False)
+
+        self._running = False
+        if self._capture_job is not None:
+            self.root.after_cancel(self._capture_job)
+            self._capture_job = None
+        self.start_btn.configure(state=tk.NORMAL, bg=COLORS["accent"])
+        self.stop_btn.configure(state=tk.DISABLED, bg=COLORS["bg_soft"])
+        self.pause_btn.configure(text="Pause", state=tk.DISABLED, bg=COLORS["bg_soft"], fg=COLORS["ink"])
+        self._stop_pulse()
         self._refresh_labels()
         self._refresh_laps_list()
-        self.laps_canvas.yview_moveto(1.0)
-        self._set_status(f"Lap saved: {name} ({format_duration(seconds)}) — next task started", "ok")
+        if self._sidebar_open:
+            self.laps_canvas.yview_moveto(1.0)
+        self._set_status(f"Saved: {name} ({format_duration(seconds)})", "ok")
 
     def start_tracking(self) -> None:
         if self._running:
@@ -1231,7 +1345,6 @@ class TrackerApp:
         self.tracker.start()
         self.start_btn.configure(state=tk.DISABLED, bg=COLORS["bg_soft"])
         self.stop_btn.configure(state=tk.NORMAL, bg=COLORS["bg_soft"])
-        self.lap_btn.configure(state=tk.NORMAL, bg=COLORS["bg_soft"])
         self._set_pause_button(False)
         self._start_pulse()
         self._refresh_labels()
@@ -1254,7 +1367,6 @@ class TrackerApp:
         self.start_btn.configure(state=tk.NORMAL, bg=COLORS["accent"])
         self.stop_btn.configure(state=tk.DISABLED, bg=COLORS["bg_soft"])
         self.pause_btn.configure(text="Pause", state=tk.DISABLED, bg=COLORS["bg_soft"], fg=COLORS["ink"])
-        self.lap_btn.configure(state=tk.DISABLED, bg=COLORS["bg_soft"])
         self._stop_pulse()
         self._set_status("Stopped", "muted")
         self._refresh_labels()

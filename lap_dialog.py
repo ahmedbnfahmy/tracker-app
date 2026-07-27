@@ -29,7 +29,7 @@ class LapNameDialog(tk.Toplevel):
 
     def __init__(self, parent: tk.Tk, elapsed_label: str = "") -> None:
         super().__init__(parent)
-        self.title("Save lap")
+        self.title("Stop session")
         self.configure(bg=COLORS["bg"])
         self.resizable(False, False)
         self.transient(parent)
@@ -54,7 +54,7 @@ class LapNameDialog(tk.Toplevel):
             anchor="w",
         ).pack(fill=tk.X)
 
-        hint = f"Time: {elapsed_label}" if elapsed_label else "Save this session segment and start the next one."
+        hint = f"Time: {elapsed_label}" if elapsed_label else "Name this session, then stop tracking."
         tk.Label(
             frame,
             text=hint,
@@ -96,7 +96,7 @@ class LapNameDialog(tk.Toplevel):
 
         tk.Button(
             actions,
-            text="Save lap",
+            text="Save & stop",
             command=self._save,
             font=FONTS["button"],
             bg=COLORS["accent"],

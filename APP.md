@@ -6,7 +6,7 @@ Tracker tracks work time and, by default, captures your screen every 10 minutes 
 ## Features
 
 ### Start / Stop tracking
-Timer runs while a session is active. Screenshots run only when **Shots on** is enabled.
+**Start** begins the timer (and screenshots if enabled). **Stop** asks for a task name, saves that segment under today's laps, and ends the session.
 
 ### Screenshots on / off
 Enabled by default (**Shots on**). Click the button to turn captures off without stopping the timer; click again to turn them back on.
@@ -14,11 +14,8 @@ Enabled by default (**Shots on**). Click the button to turn captures off without
 ### Pause / Resume
 Freeze the session timer without ending the session. Screenshots pause too; Resume continues from the same elapsed time.
 
-### Lap (named task segments)
-While tracking, Lap saves the current segment with a name, lists it under **Today's laps**, and resets the session timer for the next task. Each lap row has a delete control (✕).
-
-### Todo list
-Add tasks, check them off, and delete them. Todos persist locally and sit above today's laps so you can plan work, then track time with Start / Lap.
+### Todo list / Today's laps
+Open with **Show lists** (right sidebar). Add tasks, check them off, delete them; stopped sessions appear under today's laps (each with delete ✕). Close with **Hide lists** or ✕.
 
 ### Session timer / Time today
 Live session clock and persisted daily total.
