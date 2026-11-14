@@ -6,7 +6,7 @@ This Apps Script is set up **once by the folder owner**. Everyone else only uses
 ## What you get
 1. Tracker uploads screenshots through the script (no Google login in the app)
 2. The script makes the folder **Anyone with the link can view**
-3. Tracker shows that Drive folder link → **Copy link** / **Open link** to share with anyone
+3. Tracker shows that Drive folder link → **↗** opens it in the browser
 
 ## Setup (folder owner, once)
 
@@ -21,7 +21,7 @@ This Apps Script is set up **once by the folder owner**. Everyone else only uses
 6. **Important:** after editing Code.gs later, deploy a **new version**
 
 ## In Tracker (everyone who uploads)
-1. **Share session** → paste the `/exec` URL
+1. **Share** → paste the `/exec` URL → **Start share**
 2. Wait until **Public link** appears
-3. Use **Copy link** to share the Drive folder with anyone
-4. **Start** tracking — new screenshots appear in that folder
+3. Use **↗** to open the Drive folder in the browser
+4. **Start** tracking — new screenshots appear in that folder (stays on until **Share off**)

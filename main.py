@@ -54,8 +54,8 @@ class TrackerApp:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
         self.root.title("Tracker")
-        self.root.geometry("360x540")
-        self.root.minsize(340, 500)
+        self.root.geometry("360x630")
+        self.root.minsize(340, 590)
         self.root.resizable(False, False)
         self.root.configure(bg=COLORS["bg"])
         self._icon_images: list[ImageTk.PhotoImage] = []
@@ -74,12 +74,12 @@ class TrackerApp:
         self._pulse_job: Optional[str] = None
         self._pulse_phase = 0.0
         self._upload_lock = threading.Lock()
-        self._sharing = False
+        self._sharing = self.uploader.sharing_enabled
         self._screenshots_enabled = True
         self._sidebar_open = False
         self._main_width = 360
         self._sidebar_width = 320
-        self._window_height = 540
+        self._window_height = 630
 
         self._build_ui()
         self._refresh_labels()
@@ -93,6 +93,8 @@ class TrackerApp:
         # Re-apply after map — GNOME/X11 often ignore icons set too early
         self.root.after_idle(self._apply_window_icon)
         self.root.bind("<Map>", lambda _e: self.root.after(10, self._apply_window_icon), add="+")
+        if self._sharing:
+            self.root.after(200, self._prepare_public_link_async)
         if removed:
             self.root.after(
                 0,
@@ -139,6 +141,12 @@ class TrackerApp:
         self.root.iconname("Tracker")
 
     def _build_ui(self) -> None:
+        # Pin to window bottom so it stays visible
+        self.bottom_border = tk.Frame(self.root, height=12, bg="#2a2a2a")
+        self.bottom_border.pack(side=tk.BOTTOM, fill=tk.X)
+        self.bottom_border.pack_propagate(False)
+        tk.Frame(self.root, height=1, bg=COLORS["line"]).pack(side=tk.BOTTOM, fill=tk.X)
+
         shell = tk.Frame(self.root, bg=COLORS["bg"])
         shell.pack(fill=tk.BOTH, expand=True)
 
@@ -178,68 +186,6 @@ class TrackerApp:
             bg=COLORS["bg"],
         )
         # self.state_label.pack(side=tk.LEFT, padx=(6, 0))
-
-        self.drive_var = tk.StringVar(value="Share: off — local only")
-        self.drive_label = tk.Label(
-            main,
-            textvariable=self.drive_var,
-            font=FONTS["label"],
-            fg=COLORS["muted"],
-            bg=COLORS["bg"],
-            anchor="w",
-        )
-        # Hidden for now with share UI
-        # self.drive_label.pack(fill=tk.X, pady=(0, 4))
-
-        self.public_link_var = tk.StringVar(value="Public link: —")
-        self.public_link_label = tk.Label(
-            main,
-            textvariable=self.public_link_var,
-            font=FONTS["label"],
-            fg=COLORS["muted"],
-            bg=COLORS["bg"],
-            anchor="w",
-            wraplength=310,
-            justify=tk.LEFT,
-        )
-        # self.public_link_label.pack(fill=tk.X, pady=(0, 4))
-
-        link_actions = tk.Frame(main, bg=COLORS["bg"])
-        # link_actions.pack(fill=tk.X, pady=(0, 8))
-
-        self.copy_link_btn = tk.Button(
-            link_actions,
-            text="Copy link",
-            command=self._copy_public_link,
-            font=FONTS["button"],
-            bg=COLORS["bg_soft"],
-            fg=COLORS["ink"],
-            activebackground=COLORS["line"],
-            relief=tk.FLAT,
-            bd=0,
-            padx=8,
-            pady=4,
-            cursor="hand2",
-            state=tk.DISABLED,
-        )
-        # self.copy_link_btn.pack(side=tk.LEFT)
-
-        self.open_link_btn = tk.Button(
-            link_actions,
-            text="Open link",
-            command=self._open_public_link,
-            font=FONTS["button"],
-            bg=COLORS["bg_soft"],
-            fg=COLORS["ink"],
-            activebackground=COLORS["line"],
-            relief=tk.FLAT,
-            bd=0,
-            padx=8,
-            pady=4,
-            cursor="hand2",
-            state=tk.DISABLED,
-        )
-        # self.open_link_btn.pack(side=tk.LEFT, padx=(6, 0))
 
         tk.Label(
             main,
@@ -287,7 +233,7 @@ class TrackerApp:
         self.start_btn = tk.Button(
             actions,
             text="Start",
-            command=self.start_tracking,
+            command=self._on_start_btn,
             font=FONTS["button"],
             bg=COLORS["accent"],
             fg=COLORS["accent_text"],
@@ -323,26 +269,6 @@ class TrackerApp:
         )
         self.stop_btn.pack(side=tk.LEFT, padx=(8, 0))
 
-        self.pause_btn = tk.Button(
-            actions,
-            text="Pause",
-            command=self.toggle_pause,
-            font=FONTS["button"],
-            bg=COLORS["bg_soft"],
-            fg=COLORS["ink"],
-            activebackground=COLORS["line"],
-            activeforeground=COLORS["ink"],
-            disabledforeground=COLORS["idle"],
-            relief=tk.FLAT,
-            bd=0,
-            padx=10,
-            pady=6,
-            cursor="hand2",
-            highlightthickness=0,
-            state=tk.DISABLED,
-        )
-        self.pause_btn.pack(side=tk.LEFT, padx=(8, 0))
-
         self.shots_btn = tk.Button(
             actions,
             text="Shots on",
@@ -360,25 +286,6 @@ class TrackerApp:
             highlightthickness=0,
         )
         self.shots_btn.pack(side=tk.RIGHT)
-
-        self.share_btn = tk.Button(
-            actions,
-            text="Share session",
-            command=self._toggle_share_session,
-            font=FONTS["button"],
-            bg=COLORS["bg_soft"],
-            fg=COLORS["ink"],
-            activebackground=COLORS["line"],
-            activeforeground=COLORS["ink"],
-            relief=tk.FLAT,
-            bd=0,
-            padx=10,
-            pady=6,
-            cursor="hand2",
-            highlightthickness=0,
-        )
-        # Hidden for now — keep widget for later re-enable
-        # self.share_btn.pack(side=tk.RIGHT)
 
         lists_row = tk.Frame(main, bg=COLORS["bg"])
         lists_row.pack(fill=tk.X, pady=(6, 0))
@@ -401,11 +308,6 @@ class TrackerApp:
         )
         self.lists_btn.pack(fill=tk.X)
 
-        self._bind_button_hover(self.start_btn, COLORS["accent"], COLORS["accent_dim"])
-        self._bind_button_hover(self.stop_btn, COLORS["bg_soft"], COLORS["line"])
-        self._bind_button_hover(self.pause_btn, COLORS["bg_soft"], COLORS["line"])
-        self._bind_button_hover(self.lists_btn, COLORS["bg_soft"], COLORS["line"])
-
         self.status_var = tk.StringVar(value="Ready to track")
         self.status_label = tk.Label(
             main,
@@ -419,7 +321,95 @@ class TrackerApp:
         )
         self.status_label.pack(fill=tk.X, pady=(8, 0))
 
-        tk.Frame(main, height=1, bg=COLORS["line"]).pack(fill=tk.X, pady=(6, 4))
+        tk.Frame(main, height=1, bg=COLORS["line"]).pack(fill=tk.X, pady=(10, 8))
+
+        share_panel = tk.Frame(main, bg=COLORS["bg_mid"], padx=10, pady=10)
+        share_panel.pack(fill=tk.X)
+
+        share_header = tk.Frame(share_panel, bg=COLORS["bg_mid"])
+        share_header.pack(fill=tk.X)
+
+        tk.Label(
+            share_header,
+            text="SHARE",
+            font=FONTS["label"],
+            fg=COLORS["muted"],
+            bg=COLORS["bg_mid"],
+            anchor="w",
+        ).pack(side=tk.LEFT)
+
+        self.drive_var = tk.StringVar(value="off — local only")
+        self.drive_label = tk.Label(
+            share_header,
+            textvariable=self.drive_var,
+            font=FONTS["label"],
+            fg=COLORS["muted"],
+            bg=COLORS["bg_mid"],
+            anchor="e",
+        )
+        self.drive_label.pack(side=tk.RIGHT)
+
+        share_row = tk.Frame(share_panel, bg=COLORS["bg_mid"])
+        share_row.pack(fill=tk.X, pady=(8, 0))
+
+        self.share_btn = tk.Button(
+            share_row,
+            text="Share off",
+            command=self._toggle_share_session,
+            font=FONTS["button"],
+            bg=COLORS["bg_soft"],
+            fg=COLORS["ink"],
+            activebackground=COLORS["line"],
+            activeforeground=COLORS["ink"],
+            relief=tk.FLAT,
+            bd=0,
+            padx=14,
+            pady=6,
+            cursor="hand2",
+            highlightthickness=0,
+        )
+        self.share_btn.pack(side=tk.LEFT)
+
+        self.open_link_btn = tk.Button(
+            share_row,
+            text="↗",
+            command=self._open_public_link,
+            font=("DejaVu Sans", 12, "bold"),
+            bg=COLORS["bg_soft"],
+            fg=COLORS["ink"],
+            activebackground=COLORS["line"],
+            activeforeground=COLORS["accent"],
+            disabledforeground=COLORS["idle"],
+            relief=tk.FLAT,
+            bd=0,
+            padx=10,
+            pady=4,
+            cursor="hand2",
+            state=tk.DISABLED,
+            highlightthickness=0,
+        )
+        self.open_link_btn.pack(side=tk.RIGHT)
+
+        self.public_link_var = tk.StringVar(value="Paste /exec link to upload screenshots")
+        self.public_link_label = tk.Label(
+            share_panel,
+            textvariable=self.public_link_var,
+            font=FONTS["label"],
+            fg=COLORS["muted"],
+            bg=COLORS["bg_mid"],
+            anchor="w",
+            wraplength=290,
+            justify=tk.LEFT,
+        )
+        self.public_link_label.pack(fill=tk.X, pady=(8, 0))
+
+        self._bind_button_hover(self.start_btn, COLORS["accent"], COLORS["accent_dim"])
+        self._bind_button_hover(self.stop_btn, COLORS["bg_soft"], COLORS["line"])
+        self._bind_button_hover(self.lists_btn, COLORS["bg_soft"], COLORS["line"])
+        self._bind_button_hover(self.share_btn, COLORS["bg_soft"], COLORS["line"])
+        self._bind_button_hover(self.open_link_btn, COLORS["bg_soft"], COLORS["line"])
+
+        tk.Frame(main, height=1, bg=COLORS["line"]).pack(fill=tk.X, pady=(10, 4))
 
         tk.Label(
             main,
@@ -675,15 +665,18 @@ class TrackerApp:
         self._set_status("Lists open", "ok")
 
     def _bind_button_hover(self, button: tk.Button, normal: str, hover: str) -> None:
+        button._hover_normal = normal  # type: ignore[attr-defined]
+        button._hover_hover = hover  # type: ignore[attr-defined]
+
         def on_enter(_: object) -> None:
             if str(button["state"]) == "disabled":
                 return
-            button.configure(bg=hover)
+            button.configure(bg=button._hover_hover)  # type: ignore[attr-defined]
 
         def on_leave(_: object) -> None:
             if str(button["state"]) == "disabled":
                 return
-            button.configure(bg=normal)
+            button.configure(bg=button._hover_normal)  # type: ignore[attr-defined]
 
         button.bind("<Enter>", on_enter)
         button.bind("<Leave>", on_leave)
@@ -701,39 +694,43 @@ class TrackerApp:
     def _refresh_share_status(self) -> None:
         public = self.uploader.public_share_link
         if public:
-            short = public if len(public) < 42 else public[:39] + "…"
-            self.public_link_var.set(f"Public link: {short}")
+            short = public if len(public) < 38 else public[:35] + "…"
+            self.public_link_var.set(short)
             self.public_link_label.configure(fg=COLORS["ok"])
-            self.copy_link_btn.configure(state=tk.NORMAL)
-            self.open_link_btn.configure(state=tk.NORMAL)
-        else:
-            self.public_link_var.set("Public link: —")
+            self.open_link_btn.configure(state=tk.NORMAL, fg=COLORS["accent"])
+        elif self.uploader.has_folder():
+            self.public_link_var.set("Link saved — turn Share on to upload")
             self.public_link_label.configure(fg=COLORS["muted"])
-            self.copy_link_btn.configure(state=tk.DISABLED)
-            self.open_link_btn.configure(state=tk.DISABLED)
+            self.open_link_btn.configure(state=tk.DISABLED, fg=COLORS["idle"])
+        else:
+            self.public_link_var.set("Paste /exec link to upload screenshots")
+            self.public_link_label.configure(fg=COLORS["muted"])
+            self.open_link_btn.configure(state=tk.DISABLED, fg=COLORS["idle"])
 
         if self._sharing and self.uploader.has_folder():
-            self.drive_var.set("Share: on — uploading + anyone-with-link")
+            self.drive_var.set("on — uploading")
             self.drive_label.configure(fg=COLORS["ok"])
-            self.share_btn.configure(text="Stop sharing", bg=COLORS["live"], fg=COLORS["accent_text"])
-        elif self.uploader.has_folder():
-            self.drive_var.set("Share: off — endpoint saved")
-            self.drive_label.configure(fg=COLORS["muted"])
-            self.share_btn.configure(text="Share session", bg=COLORS["bg_soft"], fg=COLORS["ink"])
+            self.share_btn.configure(
+                text="Share on",
+                bg=COLORS["live"],
+                fg=COLORS["accent_text"],
+                activebackground=COLORS["ok"],
+            )
+            self.share_btn._hover_normal = COLORS["live"]  # type: ignore[attr-defined]
+            self.share_btn._hover_hover = COLORS["ok"]  # type: ignore[attr-defined]
         else:
-            self.drive_var.set("Share: off — paste /exec upload link")
+            self.drive_var.set(
+                "off — local only" if not self.uploader.has_folder() else "off — link saved"
+            )
             self.drive_label.configure(fg=COLORS["muted"])
-            self.share_btn.configure(text="Share session", bg=COLORS["bg_soft"], fg=COLORS["ink"])
-
-    def _copy_public_link(self) -> None:
-        link = self.uploader.public_share_link
-        if not link:
-            self._set_status("No public link yet", "error")
-            return
-        self.root.clipboard_clear()
-        self.root.clipboard_append(link)
-        self.root.update()
-        self._set_status("Public Drive link copied — share it with anyone", "ok")
+            self.share_btn.configure(
+                text="Share off",
+                bg=COLORS["bg_soft"],
+                fg=COLORS["ink"],
+                activebackground=COLORS["line"],
+            )
+            self.share_btn._hover_normal = COLORS["bg_soft"]  # type: ignore[attr-defined]
+            self.share_btn._hover_hover = COLORS["line"]  # type: ignore[attr-defined]
 
     def _open_public_link(self) -> None:
         link = self.uploader.public_share_link
@@ -752,25 +749,27 @@ class TrackerApp:
     def _toggle_share_session(self) -> None:
         if self._sharing:
             self._sharing = False
+            self.uploader.set_sharing_enabled(False)
             self._refresh_share_status()
-            self._set_status("Sharing stopped — screenshots stay local", "muted")
+            self._set_status("Share off — screenshots stay local", "muted")
             return
 
-        dialog = ShareLinkDialog(self.root, initial_link=self.uploader.folder_link)
-        self.root.wait_window(dialog)
-        if not dialog.result_link:
-            self._set_status("Share cancelled", "muted")
-            return
-
-        try:
-            self.uploader.save_share_link(dialog.result_link)
-        except Exception as exc:
-            self._set_status(f"Invalid link — {exc}", "error")
-            return
+        if not self.uploader.has_folder():
+            dialog = ShareLinkDialog(self.root, initial_link=self.uploader.folder_link)
+            self.root.wait_window(dialog)
+            if not dialog.result_link:
+                self._set_status("Share cancelled", "muted")
+                return
+            try:
+                self.uploader.save_share_link(dialog.result_link)
+            except Exception as exc:
+                self._set_status(f"Invalid link — {exc}", "error")
+                return
 
         self._sharing = True
+        self.uploader.set_sharing_enabled(True)
         self._refresh_share_status()
-        self._set_status("Sharing on — fetching public anyone-with-link…", "live")
+        self._set_status("Share on — uploading new screenshots to Drive", "live")
         self._prepare_public_link_async()
 
     def _prepare_public_link_async(self) -> None:
@@ -790,7 +789,7 @@ class TrackerApp:
 
     def _on_public_link_ready(self, link: str) -> None:
         self._refresh_share_status()
-        self._set_status("Public link ready — Copy link to share with anyone", "ok")
+        self._set_status("Public link ready — use ↗ to open Drive", "ok")
 
     def _sync_local_to_drive_async(self) -> None:
         """Upload any local captures not yet synced when sharing is enabled."""
@@ -831,7 +830,7 @@ class TrackerApp:
                 self.root.after(
                     0,
                     lambda n=len(pending): self._set_status(
-                        f"Synced {n} screenshot(s). Copy link to share.",
+                        f"Synced {n} screenshot(s). Open ↗ to view Drive.",
                         "ok",
                     ),
                 )
@@ -918,11 +917,44 @@ class TrackerApp:
         self.pulse_canvas.itemconfigure(self._pulse_dot, fill=color)
         self._pulse_job = self.root.after(40, self._animate_pulse)
 
-    def _set_pause_button(self, paused: bool) -> None:
-        if paused:
-            self.pause_btn.configure(text="Resume", state=tk.NORMAL, bg=COLORS["accent"], fg=COLORS["accent_text"])
-        else:
-            self.pause_btn.configure(text="Pause", state=tk.NORMAL, bg=COLORS["bg_soft"], fg=COLORS["ink"])
+    def _set_start_btn_idle(self) -> None:
+        self.start_btn.configure(
+            text="Start",
+            state=tk.NORMAL,
+            bg=COLORS["accent"],
+            fg=COLORS["accent_text"],
+            activebackground=COLORS["accent_dim"],
+        )
+        self.start_btn._hover_normal = COLORS["accent"]  # type: ignore[attr-defined]
+        self.start_btn._hover_hover = COLORS["accent_dim"]  # type: ignore[attr-defined]
+
+    def _set_start_btn_pause(self) -> None:
+        self.start_btn.configure(
+            text="Pause",
+            state=tk.NORMAL,
+            bg=COLORS["bg_soft"],
+            fg=COLORS["ink"],
+            activebackground=COLORS["line"],
+        )
+        self.start_btn._hover_normal = COLORS["bg_soft"]  # type: ignore[attr-defined]
+        self.start_btn._hover_hover = COLORS["line"]  # type: ignore[attr-defined]
+
+    def _set_start_btn_resume(self) -> None:
+        self.start_btn.configure(
+            text="Resume",
+            state=tk.NORMAL,
+            bg=COLORS["accent"],
+            fg=COLORS["accent_text"],
+            activebackground=COLORS["accent_dim"],
+        )
+        self.start_btn._hover_normal = COLORS["accent"]  # type: ignore[attr-defined]
+        self.start_btn._hover_hover = COLORS["accent_dim"]  # type: ignore[attr-defined]
+
+    def _on_start_btn(self) -> None:
+        if not self._running:
+            self.start_tracking()
+            return
+        self.toggle_pause()
 
     def toggle_pause(self) -> None:
         if not self._running or not self.tracker.is_running:
@@ -930,7 +962,7 @@ class TrackerApp:
 
         if self.tracker.is_paused:
             self.tracker.resume()
-            self._set_pause_button(False)
+            self._set_start_btn_pause()
             self.stop_btn.configure(state=tk.NORMAL)
             self._start_pulse()
             self._set_status("Resumed", "live")
@@ -941,8 +973,8 @@ class TrackerApp:
             if self._capture_job is not None:
                 self.root.after_cancel(self._capture_job)
                 self._capture_job = None
-            self._set_pause_button(True)
-            self.stop_btn.configure(state=tk.DISABLED)
+            self._set_start_btn_resume()
+            self.stop_btn.configure(state=tk.NORMAL)
             self._stop_pulse()
             self.state_label.configure(text="Paused", fg=COLORS["accent"])
             self._set_status("Paused — timer frozen", "muted")
@@ -1309,9 +1341,6 @@ class TrackerApp:
         if not self._running or not self.tracker.is_running:
             self._set_status("Start tracking before stopping", "error")
             return
-        if self.tracker.is_paused:
-            self._set_status("Resume before stopping", "error")
-            return
 
         elapsed = format_duration(self.tracker.session_elapsed_seconds())
         dialog = LapNameDialog(self.root, elapsed_label=elapsed)
@@ -1328,9 +1357,8 @@ class TrackerApp:
         if self._capture_job is not None:
             self.root.after_cancel(self._capture_job)
             self._capture_job = None
-        self.start_btn.configure(state=tk.NORMAL, bg=COLORS["accent"])
+        self._set_start_btn_idle()
         self.stop_btn.configure(state=tk.DISABLED, bg=COLORS["bg_soft"])
-        self.pause_btn.configure(text="Pause", state=tk.DISABLED, bg=COLORS["bg_soft"], fg=COLORS["ink"])
         self._stop_pulse()
         self._refresh_labels()
         self._refresh_laps_list()
@@ -1343,9 +1371,8 @@ class TrackerApp:
             return
         self._running = True
         self.tracker.start()
-        self.start_btn.configure(state=tk.DISABLED, bg=COLORS["bg_soft"])
+        self._set_start_btn_pause()
         self.stop_btn.configure(state=tk.NORMAL, bg=COLORS["bg_soft"])
-        self._set_pause_button(False)
         self._start_pulse()
         self._refresh_labels()
         if self._screenshots_enabled:
@@ -1364,9 +1391,8 @@ class TrackerApp:
             self.root.after_cancel(self._capture_job)
             self._capture_job = None
         self.tracker.stop()
-        self.start_btn.configure(state=tk.NORMAL, bg=COLORS["accent"])
+        self._set_start_btn_idle()
         self.stop_btn.configure(state=tk.DISABLED, bg=COLORS["bg_soft"])
-        self.pause_btn.configure(text="Pause", state=tk.DISABLED, bg=COLORS["bg_soft"], fg=COLORS["ink"])
         self._stop_pulse()
         self._set_status("Stopped", "muted")
         self._refresh_labels()
@@ -1422,7 +1448,7 @@ class TrackerApp:
                 self.root.after(
                     0,
                     lambda: self._set_status(
-                        f"Uploaded {path.name} — public link ready to copy",
+                        f"Uploaded {path.name} — open ↗ to view Drive",
                         "ok",
                     ),
                 )

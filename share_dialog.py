@@ -29,17 +29,17 @@ class ShareLinkDialog(tk.Toplevel):
 
     def __init__(self, parent: tk.Tk, initial_link: str = "") -> None:
         super().__init__(parent)
-        self.title("Share session")
+        self.title("Share")
         self.configure(bg=COLORS["bg"])
         self.resizable(False, False)
         self.transient(parent)
         self.grab_set()
 
         self.result_link: Optional[str] = None
-        self.geometry("440x250")
+        self.geometry("440x260")
         self.update_idletasks()
         px = parent.winfo_rootx() + max(0, (parent.winfo_width() - 440) // 2)
-        py = parent.winfo_rooty() + max(0, (parent.winfo_height() - 250) // 2)
+        py = parent.winfo_rooty() + max(0, (parent.winfo_height() - 260) // 2)
         self.geometry(f"+{px}+{py}")
 
         frame = tk.Frame(self, bg=COLORS["bg"], padx=20, pady=16)
@@ -47,7 +47,7 @@ class ShareLinkDialog(tk.Toplevel):
 
         tk.Label(
             frame,
-            text="Drive upload link",
+            text="Paste upload link",
             font=FONTS["title"],
             fg=COLORS["ink"],
             bg=COLORS["bg"],
@@ -58,7 +58,8 @@ class ShareLinkDialog(tk.Toplevel):
             frame,
             text=(
                 "Paste your Apps Script web-app URL (ends with /exec). "
-                "No Google login in this app — see drive_upload/README.md."
+                "From now on, new screenshots upload there until you stop. "
+                "See drive_upload/README.md for one-time setup."
             ),
             font=FONTS["body"],
             fg=COLORS["muted"],
@@ -102,7 +103,7 @@ class ShareLinkDialog(tk.Toplevel):
 
         tk.Button(
             actions,
-            text="Share session",
+            text="Start share",
             command=self._save,
             font=FONTS["button"],
             bg=COLORS["accent"],
@@ -134,7 +135,7 @@ class ShareLinkDialog(tk.Toplevel):
     def _save(self) -> None:
         link = self.link_var.get().strip()
         if not link:
-            self.message_var.set("Paste the /exec web-app link first.")
+            self.message_var.set("Paste the /exec upload link first.")
             return
         self.result_link = link
         self.destroy()

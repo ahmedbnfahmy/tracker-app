@@ -1,6 +1,6 @@
 # Tracker
 
-Ubuntu desktop app that tracks work sessions and takes screenshots every 10 minutes. Screenshots are saved locally. **Share session** uploads to Drive using a public Apps Script link — **no Google credentials in the app**.
+Ubuntu desktop app that tracks work sessions and takes screenshots every 10 minutes. Screenshots are saved locally. **Share** sends new screenshots via a public Apps Script link — **no Google credentials in the app**.
 
 See [APP.md](APP.md) and [drive_upload/README.md](drive_upload/README.md).
 
@@ -17,7 +17,8 @@ cp .env.example .env
 ## Drive sharing (no app credentials)
 
 1. Follow [drive_upload/README.md](drive_upload/README.md) (one-time Apps Script deploy)
-2. In Tracker: **Share session** → paste the `/exec` URL
+2. In Tracker: **Share** → paste the `/exec` URL → **Start share**
+3. Stays on across sessions until you click **Stop share**
 
 ## Run
 

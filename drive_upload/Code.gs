@@ -8,7 +8,7 @@
  * 4. Deploy → New deployment → Web app
  *      Execute as: Me
  *      Who has access: Anyone
- * 5. In Tracker → Share session → paste the .../exec URL
+ * 5. In Tracker → Share → paste the .../exec URL
  *
  * The script uploads files and makes the folder viewable by anyone with the link.
  * Tracker then shows that Drive folder link so you can share it.

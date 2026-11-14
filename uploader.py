@@ -48,6 +48,7 @@ class DriveUploader:
         self.share_path = Path(share_path)
         self._upload_url: str = ""
         self._public_share_link: str = ""
+        self._sharing_enabled: bool = False
         self._load_share_config()
 
     def _load_share_config(self) -> None:
@@ -57,14 +58,19 @@ class DriveUploader:
             data = json.loads(self.share_path.read_text(encoding="utf-8"))
             raw = (data.get("upload_url") or "").strip()
             self._public_share_link = (data.get("public_share_link") or "").strip()
+            self._sharing_enabled = bool(data.get("sharing_enabled", False))
             if raw:
                 try:
                     self._upload_url = normalize_upload_url(raw)
                 except ValueError:
                     self._upload_url = ""
+                    self._sharing_enabled = False
+            else:
+                self._sharing_enabled = False
         except (json.JSONDecodeError, OSError):
             self._upload_url = ""
             self._public_share_link = ""
+            self._sharing_enabled = False
 
     def _persist(self) -> None:
         self.share_path.parent.mkdir(parents=True, exist_ok=True)
@@ -73,6 +79,7 @@ class DriveUploader:
                 {
                     "upload_url": self._upload_url,
                     "public_share_link": self._public_share_link,
+                    "sharing_enabled": self._sharing_enabled,
                 },
                 indent=2,
             ),
@@ -83,6 +90,10 @@ class DriveUploader:
         self._upload_url = normalize_upload_url(link)
         self._persist()
         return self._upload_url
+
+    def set_sharing_enabled(self, enabled: bool) -> None:
+        self._sharing_enabled = bool(enabled) and bool(self._upload_url)
+        self._persist()
 
     def set_public_share_link(self, url: str) -> None:
         self._public_share_link = (url or "").strip()
@@ -99,6 +110,10 @@ class DriveUploader:
     @property
     def public_share_link(self) -> str:
         return self._public_share_link
+
+    @property
+    def sharing_enabled(self) -> bool:
+        return self._sharing_enabled and bool(self._upload_url)
 
     def has_folder(self) -> bool:
         return bool(self._upload_url)
